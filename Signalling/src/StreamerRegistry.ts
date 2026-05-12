@@ -138,6 +138,18 @@ export class StreamerRegistry extends EventEmitter {
     private onEndpointId(streamer: IStreamer, message: Messages.endpointId): void {
         const oldId = streamer.streamerId;
 
+        // Kick any existing streamer that already holds this id (handles ghosts
+        // left by previous connections that died uncleanly — sanitizeStreamerId
+        // alone allows duplicates when the id ends in digits).
+        const existing = this.find(message.id);
+        if (existing && existing !== streamer) {
+            Logger.warn(
+                `StreamerRegistry: Kicking stale streamer ${existing.streamerId} on collision with new ${message.id}.`
+            );
+            this.remove(existing);
+            existing.transport.disconnect(1000, 'Replaced by new streamer with same id');
+        }
+
         // id might conflict or be invalid so here we sanitize it
         streamer.streamerId = this.sanitizeStreamerId(message.id);
 
