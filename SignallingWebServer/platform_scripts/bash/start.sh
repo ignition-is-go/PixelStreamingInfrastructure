@@ -18,7 +18,7 @@ for arg in "${TEST_ARGS[@]}"; do
     fi
 done
 
-SERVER_ARGS+=" --serve --https_redirect --console_messages verbose --log_config --public_ip=${PUBLIC_IP}"
+SERVER_ARGS+=" --serve --https_redirect --console_messages verbose --log_config --player_keepalive_timeout 0 --public_ip=${PUBLIC_IP}"
 if [[ $SKIP_PEER_ARGS == false ]]; then
     if [[ ! -z "$STUN_SERVER" && ! -z "$TURN_SERVER" ]]; then
         PEER_OPTIONS="{\"iceServers\":[{\"urls\":[\"stun:${STUN_SERVER}\",\"turn:${TURN_SERVER}\"],\"username\":\"${TURN_USER}\",\"credential\":\"${TURN_PASS}\"}]}"
