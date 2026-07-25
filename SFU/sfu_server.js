@@ -84,7 +84,10 @@ async function createDataRouter() {
             }
         });
 
-        dataProducer.on('close', () => {
+        // mediasoup DataProducer emits 'transportclose' (not 'close') when its transport
+        // is torn down — 'close' is only on the observer. The original 'close' handler
+        // never fired, so streamerProducer was never cleared on a streamer disconnect.
+        dataProducer.on('transportclose', () => {
             streamerProducer.close();
             streamerProducer = undefined;
         });
@@ -106,7 +109,10 @@ async function createDataRouter() {
         const playerProducer = await transport.produceData({ label: 'player-producer' });
         producers[playerId] = playerProducer;
 
-        dataProducer.on('close', () => {
+        // 'transportclose', not 'close' — see handleStreamer above. This is THE reason
+        // the relay-remove never fired: the player disconnecting closes its transport,
+        // which emits 'transportclose', but the handler was registered on 'close'.
+        dataProducer.on('transportclose', () => {
             producers[playerId].close();
             delete producers[playerId];
             // Guard streamerProducer like the message-relay path above (it goes
