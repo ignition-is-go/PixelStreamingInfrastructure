@@ -109,7 +109,14 @@ async function createDataRouter() {
         dataProducer.on('close', () => {
             producers[playerId].close();
             delete producers[playerId];
-            streamerProducer.send(createRelayStatusMessage(playerId, 0), 53);
+            // Guard streamerProducer like the message-relay path above (it goes
+            // undefined when the streamer's data channel closes on a re-subscribe).
+            // Without this, a player disconnecting mid-re-subscribe throws here BEFORE
+            // the relay-remove is sent, so the streamer never reaps the PlayerId and
+            // orphaned relay players pile up (adds >> removes -> input contention).
+            if (streamerProducer) {
+                streamerProducer.send(createRelayStatusMessage(playerId, 0), 53);
+            }
         });
 
         return playerProducer.id;
