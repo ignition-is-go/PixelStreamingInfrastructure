@@ -212,6 +212,20 @@ export class StreamerRegistry extends EventEmitter {
             }
         }
 
+        // Kick any existing streamer that already holds this id (ghosts left by a
+        // previous connection that died uncleanly). Without an authorizer set, the
+        // assignment below otherwise clobbers into a DUPLICATE id — streamerList shows
+        // two entries and players can subscribe to a dead one. The new connection wins,
+        // which matches what a streamer/SFU re-registering after a crash actually wants.
+        const collidingStreamer = committedId ? this.find(committedId) : undefined;
+        if (collidingStreamer && collidingStreamer !== streamer) {
+            Logger.warn(
+                `StreamerRegistry: Kicking stale streamer holding id '${committedId}' on re-registration collision.`
+            );
+            this.remove(collidingStreamer);
+            collidingStreamer.protocol.disconnect(1000, 'Replaced by new streamer with same id');
+        }
+
         streamer.streamerId = committedId;
 
         Logger.debug(`StreamerRegistry: Streamer id change. ${oldId} -> ${streamer.streamerId}`);
