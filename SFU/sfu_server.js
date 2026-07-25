@@ -84,10 +84,13 @@ async function createDataRouter() {
             }
         });
 
-        // mediasoup DataProducer emits 'transportclose' (not 'close') when its transport
-        // is torn down — 'close' is only on the observer. The original 'close' handler
-        // never fired, so streamerProducer was never cleared on a streamer disconnect.
-        dataProducer.on('transportclose', () => {
+        // A mediasoup DataProducer has NO 'close' event (DataProducerEvents is just
+        // { transportclose, '@close' }); the app-facing close signal is the OBSERVER's
+        // 'close', which fires for BOTH an explicit .close() and a transport teardown.
+        // The teardown path explicitly closes the data producer, so the observer is the
+        // only handler that catches it. The original 'close' handler never fired, so
+        // streamerProducer was never cleared on a streamer disconnect.
+        dataProducer.observer.on('close', () => {
             streamerProducer.close();
             streamerProducer = undefined;
         });
@@ -109,10 +112,12 @@ async function createDataRouter() {
         const playerProducer = await transport.produceData({ label: 'player-producer' });
         producers[playerId] = playerProducer;
 
-        // 'transportclose', not 'close' — see handleStreamer above. This is THE reason
-        // the relay-remove never fired: the player disconnecting closes its transport,
-        // which emits 'transportclose', but the handler was registered on 'close'.
-        dataProducer.on('transportclose', () => {
+        // observer 'close' — see handleStreamer. onPeerDisconnected EXPLICITLY closes
+        // this data producer (peer.peerDataProducer.close()), which emits only the
+        // observer 'close' — not 'transportclose', and DataProducer has no plain 'close'.
+        // This is THE reason the relay-remove never fired: the handler was on 'close',
+        // an event mediasoup never emits, so the streamer never reaped the PlayerId.
+        dataProducer.observer.on('close', () => {
             producers[playerId].close();
             delete producers[playerId];
             // Guard streamerProducer like the message-relay path above (it goes
