@@ -392,7 +392,11 @@ async function onPeerAnswer(peerId, sdp) {
 function onPeerDisconnected(peerId) {
     console.log("Player %s disconnected", peerId);
     const peer = peers.get(peerId);
-    if (peer !== null) {
+    // Map.get() returns UNDEFINED (not null) for a missing key, so `!== null` let a
+    // never-fully-setup peer through and `peer.consumers` threw uncaught -> the whole
+    // SFU process crashed. A player disconnecting while no streamer is connected hits
+    // this, so it crash-loops. Truthy guard catches both null and undefined.
+    if (peer) {
         for (const consumer of peer.consumers) {
             consumer.close();
         }
@@ -419,7 +423,9 @@ function disconnectAllPeers() {
 function onLayerPreference(msg) {
     console.log("onLayerPreference: " + JSON.stringify(msg));
     const peer = peers.get(`${msg.playerId}`);
-    if (peer !== null) {
+    // Same null-vs-undefined guard bug as onPeerDisconnected: peers.get() returns
+    // undefined for a missing peer, which `!== null` admits -> peer.consumers throws.
+    if (peer) {
         for (const consumer of peer.consumers) {
             consumer.setPreferredLayers({ spatialLayer: msg.spatialLayer, temporalLayer: msg.temporalLayer });
         }
