@@ -9,6 +9,7 @@ if (!config.retrySubscribeDelaySecs) {
 }
 
 let signalServer = null;
+let signallingReconnectTimer = null;
 let mediasoupRouter;
 let streamer = null;
 let peers = new Map();
@@ -139,19 +140,63 @@ async function createDataRouter() {
     };
 }
 
+function sendSignalling(message) {
+    const socket = signalServer;
+    if (socket === null || socket.readyState !== WebSocket.OPEN) {
+        console.warn(`Cannot send ${message.type}: signalling server is not connected`);
+        return false;
+    }
+
+    try {
+        socket.send(JSON.stringify(message));
+        return true;
+    } catch (error) {
+        console.error(`Failed to send ${message.type} to signalling server: ${error.message}`);
+        return false;
+    }
+}
+
+function scheduleSignallingReconnect(server) {
+    if (signallingReconnectTimer !== null) {
+        return;
+    }
+
+    console.log("Attempting reconnect to signalling server...");
+    signallingReconnectTimer = setTimeout(() => {
+        signallingReconnectTimer = null;
+        connectSignalling(server);
+    }, 2000);
+}
+
 function connectSignalling(server) {
     console.log("Connecting to Signalling Server at %s", server);
-    signalServer = new WebSocket(server);
-    signalServer.addEventListener("open", _ => { console.log(`Connected to signalling server`); });
-    signalServer.addEventListener("error", result => { console.log(`Error: ${result.message}`); });
-    signalServer.addEventListener("message", result => onSignallingMessage(result.data));
-    signalServer.addEventListener("close", result => {
-        onStreamerDisconnected();
-        console.log(`Disconnected from signalling server: ${result.code} ${result.reason}`);
-        console.log("Attempting reconnect to signalling server...");
-        setTimeout(() => {
-            connectSignalling(server);
-        }, 2000);
+    const socket = new WebSocket(server);
+    signalServer = socket;
+    socket.addEventListener("open", _ => { console.log(`Connected to signalling server`); });
+    socket.addEventListener("error", result => { console.log(`Error: ${result.message}`); });
+    socket.addEventListener("message", result => {
+        if (signalServer === socket) {
+            onSignallingMessage(result.data);
+        }
+    });
+    socket.addEventListener("close", result => {
+        // Ignore a late close from a socket that has already been superseded.
+        if (signalServer !== socket) {
+            return;
+        }
+
+        signalServer = null;
+        try {
+            // The signalling socket is already closed. Tear down local media state
+            // without trying to send stopStreaming on it; that synchronous send used
+            // to throw here and prevent the reconnect timer from ever being scheduled.
+            onStreamerDisconnected(false);
+        } catch (error) {
+            console.error(`Failed to clean up after signalling disconnect: ${error.stack || error.message}`);
+        } finally {
+            console.log(`Disconnected from signalling server: ${result.code} ${result.reason}`);
+            scheduleSignallingReconnect(server);
+        }
     });
 }
 
@@ -169,33 +214,33 @@ async function onStreamerList(msg) {
     if (msg.ids.length > 0) {
         if (!!config.subscribeStreamerId && config.subscribeStreamerId.length != 0) {
             if (msg.ids.includes(config.subscribeStreamerId)) {
-                signalServer.send(JSON.stringify({ type: 'subscribe', streamerId: config.subscribeStreamerId }));
-                success = true;
+                success = sendSignalling({ type: 'subscribe', streamerId: config.subscribeStreamerId });
             }
         } else {
-            signalServer.send(JSON.stringify({ type: 'subscribe', streamerId: msg.ids[0] }));
-            success = true;
+            success = sendSignalling({ type: 'subscribe', streamerId: msg.ids[0] });
         }
     }
 
     if (!success) {
         // did not subscribe to anything
         setTimeout(function() {
-            signalServer.send(JSON.stringify({ type: 'listStreamers' }));
+            sendSignalling({ type: 'listStreamers' });
         }, config.retrySubscribeDelaySecs * 1000);
     }
 }
 
 async function onIdentify(msg) {
-    signalServer.send(JSON.stringify({ type: 'endpointId', id: config.SFUId }));
-    signalServer.send(JSON.stringify({ type: 'listStreamers' }));
+    sendSignalling({ type: 'endpointId', id: config.SFUId });
+    sendSignalling({ type: 'listStreamers' });
 }
 
 async function onStreamerOffer(msg) {
     console.log("Got offer from streamer");
 
     if (streamer !== null) {
-        signalServer.close(1013 /* Try again later */, 'Producer is already connected');
+        if (signalServer !== null) {
+            signalServer.close(1013 /* Try again later */, 'Producer is already connected');
+        }
         return;
     }
 
@@ -211,7 +256,7 @@ async function onStreamerOffer(msg) {
     const answer = { type: "answer", sdp: sdpAnswer };
 
     console.log("Sending answer to streamer.");
-    signalServer.send(JSON.stringify(answer));
+    sendSignalling(answer);
     streamer = { transport: transport, producers: producers, dataEnabled: dataEnabled, multiplexChannels: multiplex };
 }
 
@@ -219,7 +264,7 @@ function getNextStreamerSCTPId() {
     return streamer.transport.getNextSctpStreamId();
 }
 
-function onStreamerDisconnected() {
+function onStreamerDisconnected(notifySignalling = true) {
     console.log("Streamer disconnected");
     disconnectAllPeers();
 
@@ -229,11 +274,13 @@ function onStreamerDisconnected() {
         }
         streamer.transport.close();
         streamer = null;
-        signalServer.send(JSON.stringify({ type: 'stopStreaming' }));
+        if (notifySignalling) {
+            sendSignalling({ type: 'stopStreaming' });
 
-        setTimeout(function() {
-            signalServer.send(JSON.stringify({ type: 'listStreamers' }));
-        }, config.retrySubscribeDelaySecs * 1000);
+            setTimeout(function() {
+                sendSignalling({ type: 'listStreamers' });
+            }, config.retrySubscribeDelaySecs * 1000);
+        }
     }
 }
 
@@ -276,7 +323,7 @@ async function onPeerConnected(peerId) {
     };
 
     // send offer to peer
-    signalServer.send(JSON.stringify(offerSignal));
+    sendSignalling(offerSignal);
 
     const newPeer = {
         id: peerId,
@@ -328,7 +375,7 @@ async function setupPeerDataChannels(peerId) {
     };
 
     // Send browser a message with a send/recv data channel SCTP stream id
-    signalServer.send(JSON.stringify(peerSignal));
+    sendSignalling(peerSignal);
 
 }
 
@@ -347,7 +394,7 @@ async function setupMultiplexPeerDataChannels(peer) {
         sendStreamId: peer.peerDataProducer.sctpStreamParameters.streamId,
         recvStreamId: peer.peerDataConsumer.sctpStreamParameters.streamId
     };
-    signalServer.send(JSON.stringify(peerSignal));
+    sendSignalling(peerSignal);
 }
 
 async function setupStreamerDataChannelsForPeer(peerId) {
@@ -374,7 +421,7 @@ async function setupStreamerDataChannelsForPeer(peerId) {
     };
 
     // send streamer a message with a send/recv data channel SCTP stream id
-    signalServer.send(JSON.stringify(streamerSignal));
+    sendSignalling(streamerSignal);
 }
 
 async function onPeerAnswer(peerId, sdp) {
@@ -510,7 +557,7 @@ async function onICEStateChange(identifier, iceState) {
             const streamerDataConsumer = await streamer.transport.consumeData({ dataProducerId });
             console.log('Setting up sctp for the streamer, producer sctp id %s, consumer sctp id %s', producer.sctpStreamParameters.streamId, streamerDataConsumer.sctpStreamParameters.streamId);
         }
-        signalServer.send(JSON.stringify({ type: 'startStreaming' }));
+        sendSignalling({ type: 'startStreaming' });
     }
 }
 
