@@ -276,11 +276,16 @@ function onStreamerDisconnected(notifySignalling = true) {
         streamer = null;
         if (notifySignalling) {
             sendSignalling({ type: 'stopStreaming' });
-
-            setTimeout(function() {
-                sendSignalling({ type: 'listStreamers' });
-            }, config.retrySubscribeDelaySecs * 1000);
         }
+    }
+
+    // The signalling server can report streamerDisconnected after local media
+    // teardown has already cleared `streamer`. Resubscription must not depend on
+    // that local state, otherwise the SFU never discovers the streamer returning.
+    if (notifySignalling) {
+        setTimeout(function() {
+            sendSignalling({ type: 'listStreamers' });
+        }, config.retrySubscribeDelaySecs * 1000);
     }
 }
 
