@@ -15,6 +15,7 @@
         "start": "run-script-os",
         "start:windows": "platform_scripts\\cmd\\node\\node.exe sfu_server.js",
         "start:default": "if [ `id -u` -eq 0 ]\nthen\n export process=\"./platform_scripts/bash/node/bin/node sfu_server.js\"\nelse\n export process=\"sudo ./platform_scripts/bash/node/bin/node sfu_server.js\"\nfi\n$process ",
+        "test": "node --test tests/*.test.js",
         "lint": ""
     },
     "dependencies": {

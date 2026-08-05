@@ -3,6 +3,9 @@ const WebSocket = require('ws');
 const mediasoup = require('mediasoup');
 const mediasoupSdp = require('@epicgames-ps/mediasoup-sdp-bridge');
 const minimist = require('minimist');
+const { createDataRouter } = require('./data_router');
+const { runSafely } = require('./async_helpers');
+const { GenerationRegistry } = require('./generation_registry');
 
 if (!config.retrySubscribeDelaySecs) {
     config.retrySubscribeDelaySecs = 10;
@@ -13,133 +16,10 @@ let signallingReconnectTimer = null;
 let streamerDiscoveryTimer = null;
 let mediasoupRouter;
 let streamer = null;
+const streamerGenerations = new GenerationRegistry();
 let peers = new Map();
 let dataRouter;
 let scalabilityMode = "L1T1"; // Scalability mode defaults to L1T1 and is set by the offer from the streamer
-
-async function createDataRouter() {
-    const MULTIPLEX_MESSAGE_ID = 199; // ID | 2 byte length | PlayerId | Original message
-    const CHANNEL_RELAY_STATUS_MESSAGE_ID = 198; // ID | 2 byte length | PlayerId | 1 byte flag
-
-    if (!mediasoupRouter) {
-        console.error('cannot initialize direct transport, router is undefined');
-        throw new Error('mediasoupRouter is undefined');
-    }
-    const transport = await mediasoupRouter.createDirectTransport({ maxMessageSize: 262144 });
-
-    let streamerProducer;
-    const producers = {};
-
-    function createMultiplexHeader(playerId) {
-        const byteLength = 1 + 2 + playerId.length * 2;
-        const buffer = Buffer.alloc(byteLength);
-        let byteOffset = 0;
-        buffer.writeUInt8(MULTIPLEX_MESSAGE_ID, byteOffset);
-        byteOffset++;
-        buffer.writeUInt16LE(playerId.length * 2, byteOffset);
-        byteOffset += 2;
-        for (let i = 0; i < playerId.length; i++) {
-            buffer.writeUInt16LE(playerId.charCodeAt(i), byteOffset);
-            byteOffset += 2;
-        }
-        return buffer;
-    }
-
-    function parseMultiplexHeader(message) {
-        const type = message.readUInt8(0);
-        if (type !== MULTIPLEX_MESSAGE_ID) {
-            console.log("Received non multiplexed message type [%d]", type);
-            return {
-                playerId: ""
-            };
-        }
-        const length = message.readUInt16LE(1);
-        const headerEnd = length + 3;
-        return {
-            playerId: new TextDecoder("utf-16").decode(message.subarray(3, headerEnd)),
-            buffer: message.subarray(headerEnd, message.length)
-        }
-    }
-
-    function createRelayStatusMessage(playerId, status) {
-        const byteLength = 1 + 2 + playerId.length * 2 + 1;
-        const buffer = Buffer.alloc(byteLength);
-        let byteOffset = 0;
-        buffer.writeUInt8(CHANNEL_RELAY_STATUS_MESSAGE_ID, byteOffset);
-        byteOffset++;
-        buffer.writeUInt16LE(playerId.length * 2, byteOffset);
-        byteOffset += 2;
-        for (let i = 0; i < playerId.length; i++) {
-            buffer.writeUInt16LE(playerId.charCodeAt(i), byteOffset);
-            byteOffset += 2;
-        }
-        buffer.writeUInt8(status, byteOffset);
-        return buffer;
-    }
-
-    async function handleStreamer(dataProducer) {
-        const consumer = await transport.consumeData({ dataProducerId: dataProducer.id });
-        consumer.on('message', (message, ppid) => {
-            const relayMessage = parseMultiplexHeader(message);
-            if (relayMessage.playerId !== "" && producers.hasOwnProperty(relayMessage.playerId)) {
-                producers[relayMessage.playerId].send(relayMessage.buffer, 53);
-            }
-        });
-
-        // A mediasoup DataProducer has NO 'close' event (DataProducerEvents is just
-        // { transportclose, '@close' }); the app-facing close signal is the OBSERVER's
-        // 'close', which fires for BOTH an explicit .close() and a transport teardown.
-        // The teardown path explicitly closes the data producer, so the observer is the
-        // only handler that catches it. The original 'close' handler never fired, so
-        // streamerProducer was never cleared on a streamer disconnect.
-        dataProducer.observer.on('close', () => {
-            streamerProducer.close();
-            streamerProducer = undefined;
-        });
-
-        streamerProducer = await transport.produceData({ label: 'streamer-producer' });
-        return streamerProducer.id;
-    }
-
-    async function handlePlayer(dataProducer, playerId) {
-        streamerProducer.send(createRelayStatusMessage(playerId, 1), 53);
-
-        const consumer = await transport.consumeData({ dataProducerId: dataProducer.id });
-        consumer.on('message', (message, ppid) => {
-            if (streamerProducer) {
-                const relayMessage = Buffer.concat([createMultiplexHeader(playerId), message]);
-                streamerProducer.send(relayMessage, 53);
-            }
-        });
-        const playerProducer = await transport.produceData({ label: 'player-producer' });
-        producers[playerId] = playerProducer;
-
-        // observer 'close' — see handleStreamer. onPeerDisconnected EXPLICITLY closes
-        // this data producer (peer.peerDataProducer.close()), which emits only the
-        // observer 'close' — not 'transportclose', and DataProducer has no plain 'close'.
-        // This is THE reason the relay-remove never fired: the handler was on 'close',
-        // an event mediasoup never emits, so the streamer never reaped the PlayerId.
-        dataProducer.observer.on('close', () => {
-            producers[playerId].close();
-            delete producers[playerId];
-            // Guard streamerProducer like the message-relay path above (it goes
-            // undefined when the streamer's data channel closes on a re-subscribe).
-            // Without this, a player disconnecting mid-re-subscribe throws here BEFORE
-            // the relay-remove is sent, so the streamer never reaps the PlayerId and
-            // orphaned relay players pile up (adds >> removes -> input contention).
-            if (streamerProducer) {
-                streamerProducer.send(createRelayStatusMessage(playerId, 0), 53);
-            }
-        });
-
-        return playerProducer.id;
-    }
-
-    return {
-        handleStreamer,
-        handlePlayer
-    };
-}
 
 function sendSignalling(message) {
     const socket = signalServer;
@@ -175,7 +55,7 @@ function scheduleStreamerDiscovery() {
     }
     streamerDiscoveryTimer = setTimeout(() => {
         streamerDiscoveryTimer = null;
-        if (streamer === null) {
+        if (streamer === null && streamerGenerations.pending === null) {
             sendSignalling({ type: 'listStreamers' });
         }
     }, config.retrySubscribeDelaySecs * 1000);
@@ -189,7 +69,7 @@ function connectSignalling(server) {
     socket.addEventListener("error", result => { console.log(`Error: ${result.message}`); });
     socket.addEventListener("message", result => {
         if (signalServer === socket) {
-            onSignallingMessage(result.data);
+            void runSafely('Failed to handle signalling message', () => onSignallingMessage(result.data));
         }
     });
     socket.addEventListener("close", result => {
@@ -249,10 +129,8 @@ async function onStreamerOffer(msg) {
         streamerDiscoveryTimer = null;
     }
 
-    if (streamer !== null) {
-        if (signalServer !== null) {
-            signalServer.close(1013 /* Try again later */, 'Producer is already connected');
-        }
+    if (streamer !== null || streamerGenerations.pending !== null) {
+        console.warn('Ignoring duplicate streamer offer while a producer generation is already active');
         return;
     }
 
@@ -260,32 +138,95 @@ async function onStreamerOffer(msg) {
         scalabilityMode = msg.scalabilityMode;
     }
 
-    const transport = await createWebRtcTransport("Streamer");
-    const sdpEndpoint = mediasoupSdp.createSdpEndpoint(transport, mediasoupRouter.rtpCapabilities);
-    const { producers, dataEnabled } = await sdpEndpoint.processOffer(msg.sdp, scalabilityMode);
-    const multiplex = msg.multiplex;
-    const sdpAnswer = sdpEndpoint.createAnswer();
-    const answer = { type: "answer", sdp: sdpAnswer };
+    const candidate = streamerGenerations.begin({
+        cancelled: false,
+        transport: null,
+        producers: [],
+        dataEnabled: false,
+        multiplexChannels: msg.multiplex,
+        dataChannelsStarted: false,
+        streamerDataProducer: null,
+        streamerDataConsumer: null,
+        dataRoute: null
+    });
 
-    console.log("Sending answer to streamer.");
-    sendSignalling(answer);
-    streamer = { transport: transport, producers: producers, dataEnabled: dataEnabled, multiplexChannels: multiplex };
-}
+    try {
+        candidate.transport = await createWebRtcTransport(
+            "Streamer",
+            (iceState) => onStreamerICEStateChange(candidate, iceState)
+        );
+        if (streamerGenerations.pending !== candidate || candidate.cancelled) {
+            candidate.transport.close();
+            return;
+        }
 
-function getNextStreamerSCTPId() {
-    return streamer.transport.getNextSctpStreamId();
+        const sdpEndpoint = mediasoupSdp.createSdpEndpoint(candidate.transport, mediasoupRouter.rtpCapabilities);
+        const offerResult = await sdpEndpoint.processOffer(msg.sdp, scalabilityMode);
+        if (streamerGenerations.pending !== candidate || candidate.cancelled) {
+            for (const producer of offerResult.producers) {
+                producer.close();
+            }
+            candidate.transport.close();
+            return;
+        }
+
+        candidate.producers = offerResult.producers;
+        candidate.dataEnabled = offerResult.dataEnabled;
+        if (!streamerGenerations.activate(candidate)) {
+            throw new Error(`streamer generation ${candidate.generation} was superseded during setup`);
+        }
+        streamer = candidate;
+
+        console.log("Sending answer to streamer.");
+        if (!sendSignalling({ type: "answer", sdp: sdpEndpoint.createAnswer() })) {
+            onStreamerDisconnected(false);
+        }
+    } catch (error) {
+        if (streamerGenerations.pending === candidate) {
+            streamerGenerations.cancelPending();
+        }
+        if (streamerGenerations.isCurrent(candidate)) {
+            streamerGenerations.clearCurrent(candidate);
+            streamer = null;
+        }
+        for (const producer of candidate.producers) {
+            producer.close();
+        }
+        if (candidate.transport && !candidate.transport.closed) {
+            candidate.transport.close();
+        }
+        scheduleStreamerDiscovery();
+        throw error;
+    }
 }
 
 function onStreamerDisconnected(notifySignalling = true) {
     console.log("Streamer disconnected");
+
+    if (streamerGenerations.pending !== null) {
+        const pending = streamerGenerations.cancelPending();
+        pending.cancelled = true;
+        for (const producer of pending.producers) {
+            producer.close();
+        }
+        if (pending.transport && !pending.transport.closed) {
+            pending.transport.close();
+        }
+    }
+
+    const disconnectedStreamer = streamer;
+    streamer = null;
+    streamerGenerations.clearCurrent(disconnectedStreamer);
     disconnectAllPeers();
 
-    if (streamer !== null) {
-        for (const mediaProducer of streamer.producers) {
+    if (disconnectedStreamer !== null) {
+        dataRouter.closeStreamer(disconnectedStreamer.generation);
+        for (const mediaProducer of disconnectedStreamer.producers) {
             mediaProducer.close();
         }
-        streamer.transport.close();
-        streamer = null;
+        if (!disconnectedStreamer.transport.closed) {
+            disconnectedStreamer.transport.close();
+        }
         if (notifySignalling) {
             sendSignalling({ type: 'stopStreaming' });
         }
@@ -299,64 +240,122 @@ function onStreamerDisconnected(notifySignalling = true) {
     }
 }
 
+function isCurrentPeer(peer, upstream = streamer) {
+    return !peer.closed && peers.get(peer.id) === peer && upstream !== null &&
+        streamer === upstream && peer.streamerGeneration === upstream.generation;
+}
+
+function closePeer(peer) {
+    if (!peer) {
+        return;
+    }
+
+    if (!peer.closed) {
+        peer.closed = true;
+        if (peers.get(peer.id) === peer) {
+            peers.delete(peer.id);
+        }
+    }
+
+    if (peer.dataRouterPlayer) {
+        dataRouter.closePlayer(peer.dataRouterPlayer);
+        peer.dataRouterPlayer = null;
+    }
+    for (const consumer of peer.consumers) {
+        if (!consumer.closed) {
+            consumer.close();
+        }
+    }
+    for (const entity of [
+        peer.peerDataConsumer,
+        peer.peerDataProducer,
+        peer.streamerDataConsumer,
+        peer.streamerDataProducer,
+        peer.transport
+    ]) {
+        if (entity && !entity.closed) {
+            entity.close();
+        }
+    }
+}
+
 async function onPeerConnected(peerId) {
     console.log("Player %s joined", peerId);
 
-    if (streamer === null) {
+    const upstream = streamer;
+    if (upstream === null) {
         console.log("No streamer connected, ignoring player.");
         return;
     }
 
-    const transport = await createWebRtcTransport("Peer " + peerId);
-    const sdpEndpoint = mediasoupSdp.createSdpEndpoint(transport, mediasoupRouter.rtpCapabilities);
+    const existingPeer = peers.get(peerId);
+    if (existingPeer) {
+        closePeer(existingPeer);
+    }
 
-    // media consumers
-    let consumers = [];
+    const peer = {
+        id: peerId,
+        streamerGeneration: upstream.generation,
+        transport: null,
+        sdpEndpoint: null,
+        consumers: [],
+        peerDataProducer: null,
+        peerDataConsumer: null,
+        streamerDataProducer: null,
+        streamerDataConsumer: null,
+        dataRouterPlayer: null,
+        dataChannelsStarted: false,
+        closed: false
+    };
+    peers.set(peerId, peer);
+
     try {
-        for (const mediaProducer of streamer.producers) {
+        peer.transport = await createWebRtcTransport("Peer " + peerId);
+        if (!isCurrentPeer(peer, upstream)) {
+            closePeer(peer);
+            return;
+        }
+        peer.sdpEndpoint = mediasoupSdp.createSdpEndpoint(peer.transport, mediasoupRouter.rtpCapabilities);
+
+        for (const mediaProducer of upstream.producers) {
             // mediasoup recommends creating server-side consumers paused until
             // the browser has applied the SDP answer. Starting immediately can
             // request the only useful keyframe before the remote receiver is
             // ready, producing a connected-but-black player until a later IDR.
-            const consumer = await transport.consume({
+            const consumer = await peer.transport.consume({
                 producerId: mediaProducer.id,
                 rtpCapabilities: mediasoupRouter.rtpCapabilities,
                 paused: true
             });
+            if (!isCurrentPeer(peer, upstream)) {
+                consumer.close();
+                closePeer(peer);
+                return;
+            }
             consumer.observer.on("layerschange", function() { console.log("layer changed!", consumer.currentLayers); });
-            sdpEndpoint.addConsumer(consumer);
-            consumers.push(consumer);
+            peer.sdpEndpoint.addConsumer(consumer);
+            peer.consumers.push(consumer);
         }
-    } catch (err) {
-        console.error("transport.consume() failed:", err);
-        return;
+
+        if (upstream.dataEnabled) {
+            peer.sdpEndpoint.receiveData();
+        }
+
+        const offerSignal = {
+            type: "offer",
+            playerId: peerId,
+            sdp: peer.sdpEndpoint.createOffer(),
+            sfu: true, // indicate we're offering from sfu
+            scalabilityMode: scalabilityMode
+        };
+
+        if (!sendSignalling(offerSignal)) {
+            closePeer(peer);
+        }
+    } catch (error) {
+        closePeer(peer);
+        throw error;
     }
-
-    // data
-    if (streamer.dataEnabled) {
-        sdpEndpoint.receiveData();
-    }
-
-    const offerSignal = {
-        type: "offer",
-        playerId: peerId,
-        sdp: sdpEndpoint.createOffer(),
-        sfu: true, // indicate we're offering from sfu
-        scalabilityMode: scalabilityMode
-    };
-
-    // send offer to peer
-    sendSignalling(offerSignal);
-
-    const newPeer = {
-        id: peerId,
-        transport: transport,
-        sdpEndpoint: sdpEndpoint,
-        consumers: consumers
-    };
-
-    // add the new peer
-    peers.set(peerId, newPeer);
 }
 
 async function setupPeerDataChannels(peerId) {
@@ -366,29 +365,55 @@ async function setupPeerDataChannels(peerId) {
         return;
     }
 
-    if (streamer.multiplexChannels) {
-        await setupMultiplexPeerDataChannels(peer);
+    const upstream = streamer;
+    if (!isCurrentPeer(peer, upstream)) {
+        closePeer(peer);
+        return;
+    }
+    if (peer.dataChannelsStarted) {
+        return;
+    }
+    peer.dataChannelsStarted = true;
+
+    if (upstream.multiplexChannels) {
+        await setupMultiplexPeerDataChannels(peer, upstream);
         return;
     }
 
-    const nextStreamerSCTPStreamId = getNextStreamerSCTPId();
-    const nextPeerSCTPStreamId = getNextStreamerSCTPId();
+    const nextStreamerSCTPStreamId = upstream.transport.getNextSctpStreamId();
+    const nextPeerSCTPStreamId = peer.transport.getNextSctpStreamId();
 
     console.log(`Attempting streamer SCTP id=${nextStreamerSCTPStreamId}`);
 
     // streamer data producer (produces data for the peer)
-    peer.streamerDataProducer = await streamer.transport.produceData({ label: 'send-datachannel', sctpStreamParameters: { streamId: nextStreamerSCTPStreamId, ordered: true } });
+    peer.streamerDataProducer = await upstream.transport.produceData({ label: 'send-datachannel', sctpStreamParameters: { streamId: nextStreamerSCTPStreamId, ordered: true } });
+    if (!isCurrentPeer(peer, upstream)) {
+        closePeer(peer);
+        return;
+    }
 
     console.log(`Attempting peer SCTP id=${nextPeerSCTPStreamId}`);
 
     // peer data producer (produces data for the streamer)
     peer.peerDataProducer = await peer.transport.produceData({ label: 'send-datachannel', sctpStreamParameters: { streamId: nextPeerSCTPStreamId, ordered: true } });
+    if (!isCurrentPeer(peer, upstream)) {
+        closePeer(peer);
+        return;
+    }
 
     // peer data consumer (consumes streamer data)
     peer.peerDataConsumer = await peer.transport.consumeData({ dataProducerId: peer.streamerDataProducer.id });
+    if (!isCurrentPeer(peer, upstream)) {
+        closePeer(peer);
+        return;
+    }
 
     // streamer data consumer (consumes peer data)
-    peer.streamerDataConsumer = await streamer.transport.consumeData({ dataProducerId: peer.peerDataProducer.id });
+    peer.streamerDataConsumer = await upstream.transport.consumeData({ dataProducerId: peer.peerDataProducer.id });
+    if (!isCurrentPeer(peer, upstream)) {
+        closePeer(peer);
+        return;
+    }
 
     const peerSignal = {
         type: 'peerDataChannels',
@@ -398,17 +423,32 @@ async function setupPeerDataChannels(peerId) {
     };
 
     // Send browser a message with a send/recv data channel SCTP stream id
-    sendSignalling(peerSignal);
+    if (!sendSignalling(peerSignal)) {
+        closePeer(peer);
+    }
 
 }
 
-async function setupMultiplexPeerDataChannels(peer) {
+async function setupMultiplexPeerDataChannels(peer, upstream) {
     //this will be always 0 as we are using only one producer
     const nextPeerSCTPStreamId = peer.transport.getNextSctpStreamId();
     peer.peerDataProducer = await peer.transport.produceData({ label: 'send-datachannel', sctpStreamParameters: { streamId: nextPeerSCTPStreamId, ordered: true } });
+    if (!isCurrentPeer(peer, upstream)) {
+        closePeer(peer);
+        return;
+    }
 
-    const dataProducerId = await dataRouter.handlePlayer(peer.peerDataProducer, peer.id);
-    peer.peerDataConsumer = await peer.transport.consumeData({ dataProducerId });
+    peer.dataRouterPlayer = await dataRouter.preparePlayer(peer.peerDataProducer, peer.id, upstream.generation);
+    if (!peer.dataRouterPlayer || !isCurrentPeer(peer, upstream)) {
+        closePeer(peer);
+        return;
+    }
+
+    peer.peerDataConsumer = await peer.transport.consumeData({ dataProducerId: peer.dataRouterPlayer.producer.id });
+    if (!isCurrentPeer(peer, upstream) || !dataRouter.activatePlayer(peer.dataRouterPlayer)) {
+        closePeer(peer);
+        return;
+    }
     console.log('peerProducerId %s, peerConsumerId %s', peer.peerDataProducer.id, peer.peerDataConsumer.id);
 
     const peerSignal = {
@@ -417,11 +457,17 @@ async function setupMultiplexPeerDataChannels(peer) {
         sendStreamId: peer.peerDataProducer.sctpStreamParameters.streamId,
         recvStreamId: peer.peerDataConsumer.sctpStreamParameters.streamId
     };
-    sendSignalling(peerSignal);
+    if (!sendSignalling(peerSignal)) {
+        closePeer(peer);
+    }
 }
 
 async function setupStreamerDataChannelsForPeer(peerId) {
-    if (streamer.multiplexChannels) {
+    const upstream = streamer;
+    if (upstream === null) {
+        return;
+    }
+    if (upstream.multiplexChannels) {
         return;
     }
 
@@ -444,7 +490,9 @@ async function setupStreamerDataChannelsForPeer(peerId) {
     };
 
     // send streamer a message with a send/recv data channel SCTP stream id
-    sendSignalling(streamerSignal);
+    if (!isCurrentPeer(peer, upstream) || !sendSignalling(streamerSignal)) {
+        closePeer(peer);
+    }
 }
 
 async function onPeerAnswer(peerId, sdp) {
@@ -455,15 +503,29 @@ async function onPeerAnswer(peerId, sdp) {
         console.error(`Unable to find player ${peerId}`);
     }
     else {
+        const upstream = streamer;
         try {
             await peer.sdpEndpoint.processAnswer(sdp);
+            if (!isCurrentPeer(peer, upstream)) {
+                closePeer(peer);
+                return;
+            }
             for (const consumer of peer.consumers) {
                 await consumer.resume();
+                if (!isCurrentPeer(peer, upstream)) {
+                    closePeer(peer);
+                    return;
+                }
                 if (consumer.kind === 'video') {
                     await consumer.requestKeyFrame();
+                    if (!isCurrentPeer(peer, upstream)) {
+                        closePeer(peer);
+                        return;
+                    }
                 }
             }
         } catch (error) {
+            closePeer(peer);
             console.error(`Failed to activate media for player ${peerId}: ${error.stack || error.message}`);
         }
     }
@@ -472,42 +534,29 @@ async function onPeerAnswer(peerId, sdp) {
 function onPeerDisconnected(peerId) {
     console.log("Player %s disconnected", peerId);
     const peer = peers.get(peerId);
-    // Map.get() returns UNDEFINED (not null) for a missing key, so `!== null` let a
-    // never-fully-setup peer through and `peer.consumers` threw uncaught -> the whole
-    // SFU process crashed. A player disconnecting while no streamer is connected hits
-    // this, so it crash-loops. Truthy guard catches both null and undefined.
     if (peer) {
-        for (const consumer of peer.consumers) {
-            consumer.close();
-        }
-        if (peer.peerDataConsumer) {
-            peer.peerDataConsumer.close();
-            peer.peerDataProducer.close();
-        }
-        if (peer.streamerDataConsumer) {
-            peer.streamerDataConsumer.close();
-            peer.streamerDataProducer.close();
-        }
-        peer.transport.close();
+        closePeer(peer);
     }
-    peers.delete(peerId);
 }
 
 function disconnectAllPeers() {
     console.log("Disconnected all players");
-    for (const [peerId, peer] of peers) {
-        onPeerDisconnected(peerId);
+    for (const peer of [...peers.values()]) {
+        closePeer(peer);
     }
 }
 
-function onLayerPreference(msg) {
+async function onLayerPreference(msg) {
     console.log("onLayerPreference: " + JSON.stringify(msg));
     const peer = peers.get(`${msg.playerId}`);
     // Same null-vs-undefined guard bug as onPeerDisconnected: peers.get() returns
     // undefined for a missing peer, which `!== null` admits -> peer.consumers throws.
     if (peer) {
         for (const consumer of peer.consumers) {
-            consumer.setPreferredLayers({ spatialLayer: msg.spatialLayer, temporalLayer: msg.temporalLayer });
+            await consumer.setPreferredLayers({ spatialLayer: msg.spatialLayer, temporalLayer: msg.temporalLayer });
+            if (peers.get(peer.id) !== peer || peer.closed) {
+                return;
+            }
         }
     }
 }
@@ -522,35 +571,42 @@ async function onSignallingMessage(message) {
         return;
     }
 
-    if (msg.type === 'offer') {
-        onStreamerOffer(msg);
-    }
-    else if (msg.type === 'answer') {
-        await onPeerAnswer(msg.playerId, msg.sdp);
-    }
-    else if (msg.type === 'playerConnected') {
-        onPeerConnected(msg.playerId);
-    }
-    else if (msg.type === 'playerDisconnected') {
-        onPeerDisconnected(msg.playerId);
-    }
-    else if (msg.type === 'streamerDisconnected') {
-        onStreamerDisconnected();
-    }
-    else if (msg.type === 'dataChannelRequest') {
-        setupPeerDataChannels(msg.playerId);
-    }
-    else if (msg.type === 'peerDataChannelsReady') {
-        setupStreamerDataChannelsForPeer(msg.playerId);
-    }
-    else if (msg.type === 'layerPreference') {
-        onLayerPreference(msg);
-    }
-    else if (msg.type === 'streamerList') {
-        onStreamerList(msg);
-    }
-    else if (msg.type === 'identify') {
-        onIdentify(msg);
+    try {
+        if (msg.type === 'offer') {
+            await onStreamerOffer(msg);
+        }
+        else if (msg.type === 'answer') {
+            await onPeerAnswer(msg.playerId, msg.sdp);
+        }
+        else if (msg.type === 'playerConnected') {
+            await onPeerConnected(msg.playerId);
+        }
+        else if (msg.type === 'playerDisconnected') {
+            onPeerDisconnected(msg.playerId);
+        }
+        else if (msg.type === 'streamerDisconnected') {
+            onStreamerDisconnected();
+        }
+        else if (msg.type === 'dataChannelRequest') {
+            await setupPeerDataChannels(msg.playerId);
+        }
+        else if (msg.type === 'peerDataChannelsReady') {
+            await setupStreamerDataChannelsForPeer(msg.playerId);
+        }
+        else if (msg.type === 'layerPreference') {
+            await onLayerPreference(msg);
+        }
+        else if (msg.type === 'streamerList') {
+            await onStreamerList(msg);
+        }
+        else if (msg.type === 'identify') {
+            await onIdentify(msg);
+        }
+    } catch (error) {
+        if (msg.playerId) {
+            closePeer(peers.get(msg.playerId));
+        }
+        throw error;
     }
 }
 
@@ -573,28 +629,63 @@ async function startMediasoup() {
     return mediasoupRouter;
 }
 
-async function onICEStateChange(identifier, iceState) {
-    console.log("%s ICE state changed to %s", identifier, iceState);
+async function onStreamerICEStateChange(upstream, iceState) {
+    if (iceState !== 'completed' || streamer !== upstream || upstream.dataChannelsStarted) {
+        return;
+    }
+    upstream.dataChannelsStarted = true;
 
-    if (identifier === 'Streamer' && iceState === 'completed') {
-        if (streamer.multiplexChannels) {
-            const nextStreamerSCTPStreamId = streamer.transport.getNextSctpStreamId();
-            //this will always be 0 since we are using one producer only
+    try {
+        if (upstream.multiplexChannels) {
+            const nextStreamerSCTPStreamId = upstream.transport.getNextSctpStreamId();
             console.log(`Attempting streamer SCTP id=${nextStreamerSCTPStreamId}`);
 
-            const producer = await streamer.transport.produceData({
+            upstream.streamerDataProducer = await upstream.transport.produceData({
                 label: 'send-datachannel',
                 sctpStreamParameters: { streamId: nextStreamerSCTPStreamId, ordered: true }
             });
-            const dataProducerId = await dataRouter.handleStreamer(producer);
-            const streamerDataConsumer = await streamer.transport.consumeData({ dataProducerId });
-            console.log('Setting up sctp for the streamer, producer sctp id %s, consumer sctp id %s', producer.sctpStreamParameters.streamId, streamerDataConsumer.sctpStreamParameters.streamId);
+            if (streamer !== upstream) {
+                if (!upstream.streamerDataProducer.closed) {
+                    upstream.streamerDataProducer.close();
+                }
+                return;
+            }
+
+            upstream.dataRoute = await dataRouter.prepareStreamer(upstream.streamerDataProducer, upstream.generation);
+            if (streamer !== upstream) {
+                return;
+            }
+            if (!upstream.dataRoute) {
+                onStreamerDisconnected();
+                return;
+            }
+
+            upstream.streamerDataConsumer = await upstream.transport.consumeData({ dataProducerId: upstream.dataRoute.producer.id });
+            if (streamer !== upstream) {
+                return;
+            }
+            if (!dataRouter.activateStreamer(upstream.dataRoute)) {
+                onStreamerDisconnected();
+                return;
+            }
+            console.log(
+                'Setting up sctp for the streamer, producer sctp id %s, consumer sctp id %s',
+                upstream.streamerDataProducer.sctpStreamParameters.streamId,
+                upstream.streamerDataConsumer.sctpStreamParameters.streamId
+            );
         }
-        sendSignalling({ type: 'startStreaming' });
+        if (streamer === upstream && !sendSignalling({ type: 'startStreaming' })) {
+            onStreamerDisconnected(false);
+        }
+    } catch (error) {
+        if (streamer === upstream) {
+            onStreamerDisconnected();
+        }
+        throw error;
     }
 }
 
-async function createWebRtcTransport(identifier) {
+async function createWebRtcTransport(identifier, iceStateHandler) {
     const {
         listenIps,
         initialAvailableOutgoingBitrate
@@ -609,7 +700,12 @@ async function createWebRtcTransport(identifier) {
         initialAvailableOutgoingBitrate: initialAvailableOutgoingBitrate
     });
 
-    transport.on("icestatechange", (iceState) => onICEStateChange(identifier, iceState));
+    transport.on("icestatechange", (iceState) => {
+        console.log("%s ICE state changed to %s", identifier, iceState);
+        if (iceStateHandler) {
+            void runSafely(`${identifier} ICE state handler failed`, () => iceStateHandler(iceState));
+        }
+    });
     transport.on("iceselectedtuplechange", (iceTuple) => { console.log("%s ICE selected tuple %s", identifier, JSON.stringify(iceTuple)); });
     transport.on("sctpstatechange", (sctpState) => { console.log("%s SCTP state changed to %s", identifier, sctpState); });
 
@@ -628,9 +724,13 @@ async function main() {
     console.log(config);
 
     mediasoupRouter = await startMediasoup();
-    dataRouter = await createDataRouter();
+    dataRouter = await createDataRouter(mediasoupRouter);
 
     connectSignalling(config.signallingURL);
 }
 
-main();
+if (require.main === module) {
+    void runSafely('SFU startup failed', main, console, () => {
+        process.exitCode = 1;
+    });
+}
