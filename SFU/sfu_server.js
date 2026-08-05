@@ -10,6 +10,7 @@ if (!config.retrySubscribeDelaySecs) {
 
 let signalServer = null;
 let signallingReconnectTimer = null;
+let streamerDiscoveryTimer = null;
 let mediasoupRouter;
 let streamer = null;
 let peers = new Map();
@@ -168,6 +169,18 @@ function scheduleSignallingReconnect(server) {
     }, 2000);
 }
 
+function scheduleStreamerDiscovery() {
+    if (streamerDiscoveryTimer !== null) {
+        return;
+    }
+    streamerDiscoveryTimer = setTimeout(() => {
+        streamerDiscoveryTimer = null;
+        if (streamer === null) {
+            sendSignalling({ type: 'listStreamers' });
+        }
+    }, config.retrySubscribeDelaySecs * 1000);
+}
+
 function connectSignalling(server) {
     console.log("Connecting to Signalling Server at %s", server);
     const socket = new WebSocket(server);
@@ -201,32 +214,26 @@ function connectSignalling(server) {
 }
 
 async function onStreamerList(msg) {
-    let success = false;
-
-    // If we're reconnecting, this SFU id will be in the streamer list. We want to remove it 
-    // as we don't want to subscribe to ourself
-    const index = msg.ids.indexOf(config.SFUId);
-    if (index > -1) {
-        msg.ids.splice(index, 1);
-    }
+    // Ignore our own published id and the transient name used before an Unreal
+    // streamer commits its real endpoint id. Subscribing to UnknownStreamer can
+    // succeed at the signalling layer just before it is renamed, leaving the SFU
+    // waiting forever for an offer that will never arrive.
+    const streamerIds = msg.ids.filter(id => id !== config.SFUId && id !== 'UnknownStreamer');
 
     // subscribe to either the configured streamer, or if not configured, just grab the first id
-    if (msg.ids.length > 0) {
+    if (streamerIds.length > 0) {
         if (!!config.subscribeStreamerId && config.subscribeStreamerId.length != 0) {
-            if (msg.ids.includes(config.subscribeStreamerId)) {
-                success = sendSignalling({ type: 'subscribe', streamerId: config.subscribeStreamerId });
+            if (streamerIds.includes(config.subscribeStreamerId)) {
+                sendSignalling({ type: 'subscribe', streamerId: config.subscribeStreamerId });
             }
         } else {
-            success = sendSignalling({ type: 'subscribe', streamerId: msg.ids[0] });
+            sendSignalling({ type: 'subscribe', streamerId: streamerIds[0] });
         }
     }
 
-    if (!success) {
-        // did not subscribe to anything
-        setTimeout(function() {
-            sendSignalling({ type: 'listStreamers' });
-        }, config.retrySubscribeDelaySecs * 1000);
-    }
+    // A successful WebSocket send is not an upstream acknowledgement. Keep a
+    // bounded discovery retry armed until an actual streamer offer arrives.
+    scheduleStreamerDiscovery();
 }
 
 async function onIdentify(msg) {
@@ -236,6 +243,11 @@ async function onIdentify(msg) {
 
 async function onStreamerOffer(msg) {
     console.log("Got offer from streamer");
+
+    if (streamerDiscoveryTimer !== null) {
+        clearTimeout(streamerDiscoveryTimer);
+        streamerDiscoveryTimer = null;
+    }
 
     if (streamer !== null) {
         if (signalServer !== null) {
@@ -283,9 +295,7 @@ function onStreamerDisconnected(notifySignalling = true) {
     // teardown has already cleared `streamer`. Resubscription must not depend on
     // that local state, otherwise the SFU never discovers the streamer returning.
     if (notifySignalling) {
-        setTimeout(function() {
-            sendSignalling({ type: 'listStreamers' });
-        }, config.retrySubscribeDelaySecs * 1000);
+        scheduleStreamerDiscovery();
     }
 }
 
@@ -304,7 +314,15 @@ async function onPeerConnected(peerId) {
     let consumers = [];
     try {
         for (const mediaProducer of streamer.producers) {
-            const consumer = await transport.consume({ producerId: mediaProducer.id, rtpCapabilities: mediasoupRouter.rtpCapabilities });
+            // mediasoup recommends creating server-side consumers paused until
+            // the browser has applied the SDP answer. Starting immediately can
+            // request the only useful keyframe before the remote receiver is
+            // ready, producing a connected-but-black player until a later IDR.
+            const consumer = await transport.consume({
+                producerId: mediaProducer.id,
+                rtpCapabilities: mediasoupRouter.rtpCapabilities,
+                paused: true
+            });
             consumer.observer.on("layerschange", function() { console.log("layer changed!", consumer.currentLayers); });
             sdpEndpoint.addConsumer(consumer);
             consumers.push(consumer);
@@ -432,12 +450,22 @@ async function setupStreamerDataChannelsForPeer(peerId) {
 async function onPeerAnswer(peerId, sdp) {
     console.log("Got answer from player %s", peerId);
 
-    const consumer = peers.get(peerId);
-    if (!consumer) {
+    const peer = peers.get(peerId);
+    if (!peer) {
         console.error(`Unable to find player ${peerId}`);
     }
     else {
-        consumer.sdpEndpoint.processAnswer(sdp);
+        try {
+            await peer.sdpEndpoint.processAnswer(sdp);
+            for (const consumer of peer.consumers) {
+                await consumer.resume();
+                if (consumer.kind === 'video') {
+                    await consumer.requestKeyFrame();
+                }
+            }
+        } catch (error) {
+            console.error(`Failed to activate media for player ${peerId}: ${error.stack || error.message}`);
+        }
     }
 }
 
@@ -498,7 +526,7 @@ async function onSignallingMessage(message) {
         onStreamerOffer(msg);
     }
     else if (msg.type === 'answer') {
-        onPeerAnswer(msg.playerId, msg.sdp);
+        await onPeerAnswer(msg.playerId, msg.sdp);
     }
     else if (msg.type === 'playerConnected') {
         onPeerConnected(msg.playerId);
