@@ -210,6 +210,16 @@ export class StreamerRegistry extends EventEmitter {
                 streamer.protocol.disconnect(1008, 'streamer id not authorized');
                 return;
             }
+        } else if (message.id) {
+            // A named endpoint reconnecting after an unclean socket close must reclaim
+            // its stable routing id. sanitizeStreamerId() intentionally suffixes an id
+            // that is still present, so restore the explicit request here and let the
+            // replacement block below evict the stale holder. Keep anonymous endpoints
+            // on the normal UnknownStreamer/UnknownStreamerN allocation path.
+            const exactHolder = this.find(message.id);
+            if (exactHolder && exactHolder !== streamer) {
+                committedId = message.id;
+            }
         }
 
         // Kick any existing streamer that already holds this id (ghosts left by a
