@@ -138,6 +138,44 @@ test('registration probe observes the player-facing streamer list', async () => 
     await new Promise((resolve) => server.close(resolve));
 });
 
+test('registration probe can require a real player offer', async () => {
+    const server = new WebSocket.Server({ port: 0 });
+    await new Promise((resolve) => server.once('listening', resolve));
+    server.on('connection', (socket) => {
+        socket.on('message', (data) => {
+            const message = JSON.parse(data);
+            if (message.type === 'listStreamers') {
+                socket.send(JSON.stringify({ type: 'streamerList', ids: ['HRLV Rotunda'] }));
+            } else if (message.type === 'subscribe' && message.streamerId === 'HRLV Rotunda') {
+                socket.send(JSON.stringify({ type: 'offer', sdp: 'ready' }));
+            }
+        });
+    });
+
+    const address = server.address();
+    await probeRegistration(`ws://127.0.0.1:${address.port}`, 'HRLV Rotunda', 1000, true);
+    await new Promise((resolve) => server.close(resolve));
+});
+
+test('registration probe rejects an advertised SFU without a media offer', async () => {
+    const server = new WebSocket.Server({ port: 0 });
+    await new Promise((resolve) => server.once('listening', resolve));
+    server.on('connection', (socket) => {
+        socket.on('message', (data) => {
+            if (JSON.parse(data).type === 'listStreamers') {
+                socket.send(JSON.stringify({ type: 'streamerList', ids: ['HRLV Rotunda'] }));
+            }
+        });
+    });
+
+    const address = server.address();
+    await assert.rejects(
+        probeRegistration(`ws://127.0.0.1:${address.port}`, 'HRLV Rotunda', 25, true),
+        /timed out/
+    );
+    await new Promise((resolve) => server.close(resolve));
+});
+
 test('registration probe rejects a stale or absent SFU identity', async () => {
     const server = new WebSocket.Server({ port: 0 });
     await new Promise((resolve) => server.once('listening', resolve));
