@@ -23,6 +23,16 @@ const config = {
   // Delay between list requests when looking for a specifc streamer.
   retrySubscribeDelaySecs: 10,
 
+  // Detect a silent half-open signalling socket and reconnect with bounded backoff.
+  signallingHeartbeatIntervalSecs: 10,
+  signallingHeartbeatTimeoutSecs: 30,
+  signallingConnectTimeoutSecs: 10,
+  signallingReconnectMinDelaySecs: 2,
+  signallingReconnectMaxDelaySecs: 30,
+
+  // Allow a brief ICE interruption, but rebuild an upstream generation that stays dead.
+  streamerDisconnectGraceSecs: 5,
+
   // Enable SVC support
   enableSVC: true,
 
