@@ -12,10 +12,11 @@ function streamerListContains(data, expectedStreamerId) {
         message.ids.includes(expectedStreamerId);
 }
 
-function probeRegistration(signallingURL, expectedStreamerId, timeoutMs = 5000) {
+function probeRegistration(signallingURL, expectedStreamerId, timeoutMs = 5000, requireOffer = false) {
     return new Promise((resolve, reject) => {
         const socket = new WebSocket(signallingURL, { handshakeTimeout: timeoutMs });
         let settled = false;
+        let subscribed = false;
         const timer = setTimeout(() => {
             if (settled) {
                 return;
@@ -43,7 +44,23 @@ function probeRegistration(signallingURL, expectedStreamerId, timeoutMs = 5000) 
 
         socket.on('open', () => socket.send(JSON.stringify({ type: 'listStreamers' })));
         socket.on('message', (data) => {
-            if (streamerListContains(data, expectedStreamerId)) {
+            if (!subscribed && streamerListContains(data, expectedStreamerId)) {
+                if (requireOffer) {
+                    subscribed = true;
+                    socket.send(JSON.stringify({ type: 'subscribe', streamerId: expectedStreamerId }));
+                } else {
+                    finish();
+                }
+                return;
+            }
+
+            let message;
+            try {
+                message = JSON.parse(data);
+            } catch (_error) {
+                return;
+            }
+            if (subscribed && message.type === 'offer') {
                 finish();
             }
         });
@@ -56,12 +73,14 @@ async function main() {
     const signallingURL = args.signallingURL;
     const streamerId = args.streamerId;
     const timeoutMs = Number(args.timeoutMs || 5000);
+    const requireOffer = args.requireOffer === true || args.requireOffer === 'true';
     if (!signallingURL || !streamerId || !Number.isFinite(timeoutMs) || timeoutMs <= 0) {
-        throw new Error('usage: registration_probe.js --signallingURL=ws://host:port --streamerId=ID [--timeoutMs=5000]');
+        throw new Error('usage: registration_probe.js --signallingURL=ws://host:port --streamerId=ID [--timeoutMs=5000] [--requireOffer]');
     }
 
-    await probeRegistration(signallingURL, streamerId, timeoutMs);
-    console.log(`SFU ${streamerId} is registered at ${signallingURL}`);
+    await probeRegistration(signallingURL, streamerId, timeoutMs, requireOffer);
+    const status = requireOffer ? 'registered and producing offers' : 'registered';
+    console.log(`SFU ${streamerId} is ${status} at ${signallingURL}`);
 }
 
 if (require.main === module) {
