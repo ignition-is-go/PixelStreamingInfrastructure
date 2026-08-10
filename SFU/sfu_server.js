@@ -6,13 +6,35 @@ const minimist = require('minimist');
 const { createDataRouter } = require('./data_router');
 const { runSafely } = require('./async_helpers');
 const { GenerationRegistry } = require('./generation_registry');
+const { SignallingWatchdog, reconnectDelayMs } = require('./signalling_watchdog');
+const { StreamerLivenessMonitor } = require('./streamer_liveness');
 
 if (!config.retrySubscribeDelaySecs) {
     config.retrySubscribeDelaySecs = 10;
 }
+if (!config.signallingHeartbeatIntervalSecs) {
+    config.signallingHeartbeatIntervalSecs = 10;
+}
+if (!config.signallingHeartbeatTimeoutSecs) {
+    config.signallingHeartbeatTimeoutSecs = 30;
+}
+if (!config.signallingConnectTimeoutSecs) {
+    config.signallingConnectTimeoutSecs = 10;
+}
+if (!config.signallingReconnectMinDelaySecs) {
+    config.signallingReconnectMinDelaySecs = 2;
+}
+if (!config.signallingReconnectMaxDelaySecs) {
+    config.signallingReconnectMaxDelaySecs = 30;
+}
+if (!config.streamerDisconnectGraceSecs) {
+    config.streamerDisconnectGraceSecs = 5;
+}
 
 let signalServer = null;
+let signallingWatchdog = null;
 let signallingReconnectTimer = null;
+let signallingReconnectAttempt = 0;
 let streamerDiscoveryTimer = null;
 let mediasoupRouter;
 let streamer = null;
@@ -42,11 +64,17 @@ function scheduleSignallingReconnect(server) {
         return;
     }
 
-    console.log("Attempting reconnect to signalling server...");
+    const delayMs = reconnectDelayMs(
+        signallingReconnectAttempt,
+        config.signallingReconnectMinDelaySecs * 1000,
+        config.signallingReconnectMaxDelaySecs * 1000
+    );
+    signallingReconnectAttempt += 1;
+    console.log(`Reconnecting to signalling server in ${delayMs}ms...`);
     signallingReconnectTimer = setTimeout(() => {
         signallingReconnectTimer = null;
         connectSignalling(server);
-    }, 2000);
+    }, delayMs);
 }
 
 function scheduleStreamerDiscovery() {
@@ -63,13 +91,35 @@ function scheduleStreamerDiscovery() {
 
 function connectSignalling(server) {
     console.log("Connecting to Signalling Server at %s", server);
-    const socket = new WebSocket(server);
+    const socket = new WebSocket(server, {
+        handshakeTimeout: config.signallingConnectTimeoutSecs * 1000
+    });
     signalServer = socket;
-    socket.addEventListener("open", _ => { console.log(`Connected to signalling server`); });
+    socket.addEventListener("open", _ => {
+        signallingReconnectAttempt = 0;
+        console.log(`Connected to signalling server`);
+        signallingWatchdog = new SignallingWatchdog(socket, {
+            intervalMs: config.signallingHeartbeatIntervalSecs * 1000,
+            timeoutMs: config.signallingHeartbeatTimeoutSecs * 1000,
+            openState: WebSocket.OPEN,
+            onStale: () => {
+                if (signalServer === socket) {
+                    socket.terminate();
+                }
+            }
+        });
+        signallingWatchdog.start();
+    });
     socket.addEventListener("error", result => { console.log(`Error: ${result.message}`); });
     socket.addEventListener("message", result => {
         if (signalServer === socket) {
+            signallingWatchdog?.recordActivity();
             void runSafely('Failed to handle signalling message', () => onSignallingMessage(result.data));
+        }
+    });
+    socket.on("pong", () => {
+        if (signalServer === socket) {
+            signallingWatchdog?.recordActivity();
         }
     });
     socket.addEventListener("close", result => {
@@ -78,6 +128,8 @@ function connectSignalling(server) {
             return;
         }
 
+        signallingWatchdog?.stop();
+        signallingWatchdog = null;
         signalServer = null;
         try {
             // The signalling socket is already closed. Tear down local media state
@@ -147,13 +199,24 @@ async function onStreamerOffer(msg) {
         dataChannelsStarted: false,
         streamerDataProducer: null,
         streamerDataConsumer: null,
-        dataRoute: null
+        dataRoute: null,
+        liveness: null
+    });
+    candidate.liveness = new StreamerLivenessMonitor({
+        disconnectGraceMs: config.streamerDisconnectGraceSecs * 1000,
+        onDead: (reason) => {
+            if (streamerGenerations.pending === candidate || streamerGenerations.isCurrent(candidate)) {
+                console.warn(`Streamer generation ${candidate.generation} is no longer usable: ${reason}`);
+                onStreamerDisconnected();
+            }
+        }
     });
 
     try {
         candidate.transport = await createWebRtcTransport(
             "Streamer",
-            (iceState) => onStreamerICEStateChange(candidate, iceState)
+            (iceState) => onStreamerICEStateChange(candidate, iceState),
+            (sctpState) => candidate.liveness.onSctpState(sctpState)
         );
         if (streamerGenerations.pending !== candidate || candidate.cancelled) {
             candidate.transport.close();
@@ -185,6 +248,7 @@ async function onStreamerOffer(msg) {
         if (streamerGenerations.pending === candidate) {
             streamerGenerations.cancelPending();
         }
+        candidate.liveness.stop();
         if (streamerGenerations.isCurrent(candidate)) {
             streamerGenerations.clearCurrent(candidate);
             streamer = null;
@@ -206,6 +270,7 @@ function onStreamerDisconnected(notifySignalling = true) {
     if (streamerGenerations.pending !== null) {
         const pending = streamerGenerations.cancelPending();
         pending.cancelled = true;
+        pending.liveness?.stop();
         for (const producer of pending.producers) {
             producer.close();
         }
@@ -220,6 +285,7 @@ function onStreamerDisconnected(notifySignalling = true) {
     disconnectAllPeers();
 
     if (disconnectedStreamer !== null) {
+        disconnectedStreamer.liveness?.stop();
         dataRouter.closeStreamer(disconnectedStreamer.generation);
         for (const mediaProducer of disconnectedStreamer.producers) {
             mediaProducer.close();
@@ -630,6 +696,7 @@ async function startMediasoup() {
 }
 
 async function onStreamerICEStateChange(upstream, iceState) {
+    upstream.liveness.onIceState(iceState);
     if (iceState !== 'completed' || streamer !== upstream || upstream.dataChannelsStarted) {
         return;
     }
@@ -685,7 +752,7 @@ async function onStreamerICEStateChange(upstream, iceState) {
     }
 }
 
-async function createWebRtcTransport(identifier, iceStateHandler) {
+async function createWebRtcTransport(identifier, iceStateHandler, sctpStateHandler) {
     const {
         listenIps,
         initialAvailableOutgoingBitrate
@@ -707,7 +774,12 @@ async function createWebRtcTransport(identifier, iceStateHandler) {
         }
     });
     transport.on("iceselectedtuplechange", (iceTuple) => { console.log("%s ICE selected tuple %s", identifier, JSON.stringify(iceTuple)); });
-    transport.on("sctpstatechange", (sctpState) => { console.log("%s SCTP state changed to %s", identifier, sctpState); });
+    transport.on("sctpstatechange", (sctpState) => {
+        console.log("%s SCTP state changed to %s", identifier, sctpState);
+        if (sctpStateHandler) {
+            void runSafely(`${identifier} SCTP state handler failed`, () => sctpStateHandler(sctpState));
+        }
+    });
 
     return transport;
 }

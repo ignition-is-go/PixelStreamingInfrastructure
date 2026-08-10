@@ -21,6 +21,10 @@ jobs:
               uses: actions/setup-node@v4
               with:
                   node-version-file: NODE_VERSION
+                  cache: npm
+
+            - name: Install locked dependencies
+              run: npm ci --workspace=SFU
 
             - name: Test SFU lifecycle races
               run: node --test SFU/tests/*.test.js
