@@ -60,6 +60,17 @@ export interface IServerConfig {
     // ships no authentication of its own. See StreamerIdAuthorizer. When omitted, the default
     // behaviour is unchanged (requested id accepted, numeric suffix appended on collision).
     authorizeStreamerId?: StreamerIdAuthorizer;
+
+    // Optional SFU join-order barriers, mapping a dependent SFU's streamer id to a
+    // required streamer id. While the required streamer is absent (or, when it is
+    // itself an SFU, not yet subscribed to its own upstream), the dependent SFU is
+    // sent an empty streamer list and its subscribe requests are refused, so it can
+    // only join the streamer after the required SFU's data channels are in place.
+    // This enforces a deterministic SFU join order at the streamer: UE 5.8's
+    // PixelStreaming2 registry matches SFU data tracks by their (identical) channel
+    // label, so with more than one SFU the later joiner's relayed players lose their
+    // data-channel binding. The barrier guarantees which SFU that is.
+    sfuSubscribeBarriers?: Record<string, string>;
 }
 
 export type ProtocolConfig = {

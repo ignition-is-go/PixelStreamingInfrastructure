@@ -109,6 +109,11 @@ program
         config_file.max_players || '0'
     )
     .option(
+        '--sfu_subscribe_barriers <json-string>',
+        'JSON object mapping a dependent SFU streamer id to a required streamer id. The dependent SFU is sent an empty streamer list (and refused subscriptions) until the required streamer is registered and, when it is itself an SFU, subscribed to its own upstream — enforcing a deterministic SFU join order at the streamer. Also settable via the SFU_SUBSCRIBE_BARRIERS environment variable.',
+        config_file.sfu_subscribe_barriers || process.env.SFU_SUBSCRIBE_BARRIERS || ''
+    )
+    .option(
         '--player_keepalive_timeout <milliseconds>',
         'Disconnect a player after this many milliseconds without a keepalive response. 0 = disabled',
         config_file.player_keepalive_timeout || '30000'
@@ -278,6 +283,17 @@ const serverOpts: IServerConfig = {
     maxSubscribers: options.max_players,
     playerKeepaliveTimeout: Number(options.player_keepalive_timeout)
 };
+
+if (options.sfu_subscribe_barriers) {
+    try {
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+        serverOpts.sfuSubscribeBarriers = JSON.parse(options.sfu_subscribe_barriers);
+    } catch {
+        throw Error(
+            `--sfu_subscribe_barriers is not valid JSON: ${JSON.stringify(options.sfu_subscribe_barriers)}`
+        );
+    }
+}
 
 const shouldServerStart = options.serve || options.rest_api;
 if (shouldServerStart) {
