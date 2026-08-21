@@ -175,7 +175,40 @@ export class SFUConnection extends EventEmitter implements IPlayer, IStreamer, L
         this.protocol.on(Messages.peerDataChannels.typeName, this.sendToPlayer.bind(this));
     }
 
+    /**
+     * Returns the streamer id this SFU is waiting on when a configured subscribe
+     * barrier is closed, or null when no barrier applies or it is open. The barrier
+     * opens once the required streamer is registered and — when it is itself an
+     * SFU — has subscribed to its own upstream (its playerConnected has then already
+     * been forwarded to the streamer, so the streamer registered it first).
+     */
+    private heldByBarrier(): string | null {
+        const barriers = this.server.config.sfuSubscribeBarriers;
+        if (!barriers) {
+            return null;
+        }
+        const requiredId = barriers[this.streamerId];
+        if (!requiredId) {
+            return null;
+        }
+        const required = this.server.streamerRegistry.find(requiredId);
+        if (!required) {
+            return requiredId;
+        }
+        if (required instanceof SFUConnection && !required.subscribedStreamer) {
+            return requiredId;
+        }
+        return null;
+    }
+
     private subscribe(streamerId: string) {
+        const held = this.heldByBarrier();
+        if (held) {
+            Logger.warn(
+                `subscribe: SFU ${this.streamerId} (${this.playerId}) is held by a subscribe barrier until ${held} has subscribed upstream; refusing subscription to ${streamerId}`
+            );
+            return;
+        }
         const streamer = this.server.streamerRegistry.find(streamerId);
         if (!streamer) {
             Logger.error(
@@ -299,8 +332,18 @@ export class SFUConnection extends EventEmitter implements IPlayer, IStreamer, L
     }
 
     private onListStreamers(_message: Messages.listStreamers): void {
+        // An SFU held by a subscribe barrier is shown an empty list rather than a
+        // filtered one: SFUs without a configured subscription take the first listed
+        // id, so any visible streamer could be subscribed to early. The SFU's
+        // discovery loop keeps polling, and sees the real list once the barrier opens.
+        const held = this.heldByBarrier();
+        if (held) {
+            Logger.info(
+                `SFU ${this.streamerId} (${this.playerId}) is held by a subscribe barrier until ${held} has subscribed upstream; sending an empty streamer list.`
+            );
+        }
         const listMessage = MessageHelpers.createMessage(Messages.streamerList, {
-            ids: this.server.streamerRegistry.streamers.map((streamer) => streamer.streamerId)
+            ids: held ? [] : this.server.streamerRegistry.streamers.map((streamer) => streamer.streamerId)
         });
         this.sendMessage(listMessage);
     }
