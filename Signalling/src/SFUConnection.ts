@@ -248,6 +248,38 @@ export class SFUConnection extends EventEmitter implements IPlayer, IStreamer, L
         this.subscribedStreamer.off('id_changed', this.streamerIdChangeListener);
         this.subscribedStreamer.off('disconnect', this.streamerDisconnectedListener);
         this.subscribedStreamer = null;
+
+        this.kickDependents();
+    }
+
+    /**
+     * When this SFU loses its upstream subscription and another SFU's subscribe
+     * barrier names it as required, that dependent must not stay subscribed: it
+     * would remain attached while this SFU rejoins later, inverting the join order
+     * the barrier exists to guarantee. Kick each subscribed dependent with a
+     * streamerDisconnected message — the same signal it handles when the streamer
+     * itself goes away — so it re-enters discovery and is held by the barrier
+     * until this SFU has resubscribed. Guarded against cycles: a dependent that
+     * is already unsubscribed is skipped.
+     */
+    private kickDependents(): void {
+        const barriers = this.server.config.sfuSubscribeBarriers;
+        if (!barriers || !this.streamerId) {
+            return;
+        }
+        for (const [dependentId, requiredId] of Object.entries(barriers)) {
+            if (requiredId !== this.streamerId || dependentId === this.streamerId) {
+                continue;
+            }
+            const dependent = this.server.streamerRegistry.find(dependentId);
+            if (dependent instanceof SFUConnection && dependent.subscribedStreamer) {
+                Logger.warn(
+                    `SFU ${this.streamerId} lost its upstream subscription; kicking dependent SFU ${dependentId} so it re-enters through the subscribe barrier.`
+                );
+                dependent.unsubscribe();
+                dependent.sendMessage(MessageHelpers.createMessage(Messages.streamerDisconnected));
+            }
+        }
     }
 
     private sendToStreamer(message: BaseMessage): void {
