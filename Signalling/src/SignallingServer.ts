@@ -15,6 +15,7 @@ import {
     KeepaliveMonitor
 } from '@epicgames-ps/lib-pixelstreamingcommon-ue5.8';
 import { stringify } from './Utils';
+import { createTurnRestIceServer } from './TurnCredentials';
 
 /**
  * An interface describing the possible options to pass when creating
@@ -38,6 +39,12 @@ export interface IServerConfig {
 
     // The peer configuration object to send to peers in the config message when they connect.
     peerOptions: unknown;
+
+    // Optional coturn REST credentials. The shared secret never leaves the
+    // signaller; each config message receives a short-lived HMAC credential.
+    turnSharedSecret?: string;
+    turnUrls?: string[];
+    turnCredentialTtlSeconds?: number;
 
     // Additional websocket options for the streamer listening websocket.
     streamerWsOptions?: wslib.ServerOptions;
@@ -144,12 +151,35 @@ export class SignallingServer {
         }
     }
 
+    private peerConnectionOptions(): unknown {
+        const configured = this.config.peerOptions;
+        if (!this.config.turnSharedSecret || !this.config.turnUrls?.length) {
+            return configured;
+        }
+
+        const base =
+            configured !== null && typeof configured === 'object' && !Array.isArray(configured)
+                ? { ...(configured as Record<string, unknown>) }
+                : {};
+        const existingIceServers = Array.isArray(base['iceServers']) ? (base['iceServers'] as unknown[]) : [];
+        return {
+            ...base,
+            iceServers: [
+                ...existingIceServers,
+                createTurnRestIceServer(
+                    this.config.turnUrls,
+                    this.config.turnSharedSecret,
+                    this.config.turnCredentialTtlSeconds || 600
+                )
+            ]
+        };
+    }
+
     private sendConfigMessage(connection: { sendMessage(msg: Messages.config): void }): void {
         // peer connection options is a general field with all optional fields;
         // it doesnt play nice with mergePartial so we just add it verbatim
         const message: Messages.config = MessageHelpers.createMessage(Messages.config, this.protocolConfig);
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-        message.peerConnectionOptions = this.protocolConfig['peerConnectionOptions'];
+        message.peerConnectionOptions = this.peerConnectionOptions() as Messages.peerConnectionOptions;
         connection.sendMessage(message);
     }
 

@@ -13,6 +13,7 @@ import {
 import { beautify, IProgramOptions } from './Utils';
 import { initInputHandler } from './InputHandler';
 import { Command, Option } from 'commander';
+import { readFileSync } from 'fs';
 import { initialize } from 'express-openapi';
 import configHandler from './paths/config';
 import playersHandler from './paths/players';
@@ -281,12 +282,20 @@ const serverOpts: IServerConfig = {
     sfuPort: options.sfu_port,
     peerOptions: options.peer_options,
     maxSubscribers: options.max_players,
-    playerKeepaliveTimeout: Number(options.player_keepalive_timeout)
+    playerKeepaliveTimeout: Number(options.player_keepalive_timeout),
+    // TURN REST auth is intentionally environment-only so the shared secret is
+    // neither logged with CLI options nor exposed in a process argument.
+    turnSharedSecret: process.env.TURN_SHARED_SECRET_FILE
+        ? readFileSync(process.env.TURN_SHARED_SECRET_FILE, 'utf8').trim()
+        : process.env.TURN_SHARED_SECRET,
+    turnUrls: process.env.TURN_URLS?.split(',')
+        .map((url) => url.trim())
+        .filter((url) => url.length > 0),
+    turnCredentialTtlSeconds: Number(process.env.TURN_CREDENTIAL_TTL_SECONDS || 600)
 };
 
 if (options.sfu_subscribe_barriers) {
     try {
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
         serverOpts.sfuSubscribeBarriers = JSON.parse(options.sfu_subscribe_barriers);
     } catch {
         throw Error(
