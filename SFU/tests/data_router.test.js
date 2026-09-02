@@ -4,7 +4,7 @@ const test = require('node:test');
 
 const { runSafely } = require('../async_helpers');
 const { GenerationRegistry } = require('../generation_registry');
-const { createDataRouter, createMultiplexHeader } = require('../data_router');
+const { createDataRouter, createMultiplexHeader, isLegacyAutomaticHomeReset } = require('../data_router');
 
 let nextEntityId = 0;
 
@@ -266,6 +266,33 @@ test('non-multiplexed streamer messages are ignored without terminating routing'
 
     assert.equal(route.producer.closed, false);
     assert.match(harness.logger.warnings[0], /non-multiplexed/);
+});
+
+function uiInteraction(descriptor) {
+    return Buffer.concat([Buffer.from([50]), Buffer.from(JSON.stringify(descriptor), 'utf16le')]);
+}
+
+test('legacy combined Home resets are identified without blocking explicit actions', () => {
+    assert.equal(isLegacyAutomaticHomeReset(uiInteraction({
+        StreamCamera: { SetHome: true, HomeLocationX: 1, ResetHome: true }
+    })), true);
+    assert.equal(isLegacyAutomaticHomeReset(uiInteraction({ StreamCamera: { SetHome: true } })), false);
+    assert.equal(isLegacyAutomaticHomeReset(uiInteraction({ StreamCamera: { ResetHome: true } })), false);
+    assert.equal(isLegacyAutomaticHomeReset(uiInteraction({ StreamCamera: { GoToPreset: 'Hero' } })), false);
+});
+
+test('legacy combined Home reset is dropped before the streamer route', async () => {
+    const harness = await createHarness();
+    const { route } = await activateRoute(harness, 1);
+    const { player } = await activatePlayer(harness, 1, 'LegacyTab');
+    const before = route.producer.messages.length;
+
+    player.consumer.emit('message', uiInteraction({
+        StreamCamera: { SetHome: true, ResetHome: true }
+    }));
+
+    assert.equal(route.producer.messages.length, before);
+    assert.match(harness.logger.warnings.at(-1), /LegacyTab/);
 });
 
 test('player and streamer messages route only through active current identities', async () => {
