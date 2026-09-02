@@ -5,13 +5,13 @@ const UI_INTERACTION_MESSAGE_ID = 50;
 // Temporary compatibility guard for released clients that combined automatic
 // Home synchronization with ResetHome. Current explicit Home controls send the
 // two operations as separate descriptors.
-function isLegacyAutomaticHomeReset(message) {
+function isHomeReset(message) {
     if (!Buffer.isBuffer(message) || message.length < 2 || message.readUInt8(0) !== UI_INTERACTION_MESSAGE_ID) {
         return false;
     }
 
     const descriptor = new TextDecoder('utf-16').decode(message.subarray(1));
-    return /"SetHome"\s*:\s*true/.test(descriptor) && /"ResetHome"\s*:\s*true/.test(descriptor);
+    return /"ResetHome"\s*:\s*true/.test(descriptor);
 }
 
 function closeIfOpen(entity) {
@@ -254,8 +254,8 @@ async function createDataRouter(mediasoupRouter, logger = console) {
             player.consumer.on('message', (message) => {
                 const activeRoute = currentRoute;
                 if (player.active && !player.closed && players.get(player.id) === player) {
-                    if (isLegacyAutomaticHomeReset(message)) {
-                        logger.warn(`Dropping legacy combined SetHome+ResetHome from ${player.id}`);
+                    if (isHomeReset(message)) {
+                        logger.warn(`Dropping temporarily disabled ResetHome from ${player.id}`);
                         return;
                     }
                     sendToStreamer(activeRoute, Buffer.concat([createMultiplexHeader(player.id), message]));
@@ -327,5 +327,5 @@ module.exports = {
     createMultiplexHeader,
     parseMultiplexHeader,
     createRelayStatusMessage,
-    isLegacyAutomaticHomeReset
+    isHomeReset
 };

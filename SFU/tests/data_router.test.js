@@ -4,7 +4,7 @@ const test = require('node:test');
 
 const { runSafely } = require('../async_helpers');
 const { GenerationRegistry } = require('../generation_registry');
-const { createDataRouter, createMultiplexHeader, isLegacyAutomaticHomeReset } = require('../data_router');
+const { createDataRouter, createMultiplexHeader, isHomeReset } = require('../data_router');
 
 let nextEntityId = 0;
 
@@ -272,13 +272,13 @@ function uiInteraction(descriptor) {
     return Buffer.concat([Buffer.from([50]), Buffer.from(JSON.stringify(descriptor), 'utf16le')]);
 }
 
-test('legacy combined Home resets are identified without blocking explicit actions', () => {
-    assert.equal(isLegacyAutomaticHomeReset(uiInteraction({
+test('temporary containment identifies every Home reset without blocking other camera actions', () => {
+    assert.equal(isHomeReset(uiInteraction({
         StreamCamera: { SetHome: true, HomeLocationX: 1, ResetHome: true }
     })), true);
-    assert.equal(isLegacyAutomaticHomeReset(uiInteraction({ StreamCamera: { SetHome: true } })), false);
-    assert.equal(isLegacyAutomaticHomeReset(uiInteraction({ StreamCamera: { ResetHome: true } })), false);
-    assert.equal(isLegacyAutomaticHomeReset(uiInteraction({ StreamCamera: { GoToPreset: 'Hero' } })), false);
+    assert.equal(isHomeReset(uiInteraction({ StreamCamera: { SetHome: true } })), false);
+    assert.equal(isHomeReset(uiInteraction({ StreamCamera: { ResetHome: true } })), true);
+    assert.equal(isHomeReset(uiInteraction({ StreamCamera: { GoToPreset: 'Hero' } })), false);
 });
 
 test('legacy combined Home reset is dropped before the streamer route', async () => {
