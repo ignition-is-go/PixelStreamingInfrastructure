@@ -189,6 +189,31 @@ test('old player close callback cannot delete a reused player id', async () => {
     assert.equal(newPlayer.player.closed, false);
 });
 
+test('late teardown of a reused player id does not swallow command responses', async () => {
+    const harness = await createHarness();
+    const { route } = await activateRoute(harness, 1);
+    const oldPlayer = await activatePlayer(harness, 1, 'PlayerReconnected');
+    const currentPlayer = await activatePlayer(harness, 1, 'PlayerReconnected');
+
+    // This is the production race: teardown from the replaced socket arrives
+    // after its replacement has already claimed the same signalling player id.
+    oldPlayer.dataProducer.close();
+
+    const command = Buffer.from('Hero Push Forward');
+    currentPlayer.player.consumer.emit('message', command);
+    assert.deepEqual(
+        route.producer.messages.at(-1).message,
+        Buffer.concat([createMultiplexHeader('PlayerReconnected'), command])
+    );
+
+    const response = Buffer.from('shot-selected');
+    route.consumer.emit(
+        'message',
+        Buffer.concat([createMultiplexHeader('PlayerReconnected'), response])
+    );
+    assert.deepEqual(currentPlayer.player.producer.messages.at(-1).message, response);
+});
+
 test('current active players are replayed exactly once to a replacement route', async () => {
     const harness = await createHarness();
     await activateRoute(harness, 1);
