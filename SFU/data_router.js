@@ -2,16 +2,21 @@ const MULTIPLEX_MESSAGE_ID = 199; // ID | 2 byte length | PlayerId | Original me
 const CHANNEL_RELAY_STATUS_MESSAGE_ID = 198; // ID | 2 byte length | PlayerId | 1 byte flag
 const UI_INTERACTION_MESSAGE_ID = 50;
 
-// Temporary compatibility guard for released clients that combined automatic
-// Home synchronization with ResetHome. Current explicit Home controls send the
-// two operations as separate descriptors.
-function isHomeReset(message) {
+// Only an explicitly attributed operator action may move the camera Home. This
+// keeps reconnecting and legacy clients from releasing the active shot while
+// preserving the current UI's Home control.
+function isUnattributedHomeReset(message) {
     if (!Buffer.isBuffer(message) || message.length < 2 || message.readUInt8(0) !== UI_INTERACTION_MESSAGE_ID) {
         return false;
     }
 
-    const descriptor = new TextDecoder('utf-16').decode(message.subarray(1));
-    return /"ResetHome"\s*:\s*true/.test(descriptor);
+    try {
+        const descriptor = JSON.parse(new TextDecoder('utf-16').decode(message.subarray(1)));
+        const camera = descriptor?.StreamCamera;
+        return camera?.ResetHome === true && camera.ResetHomeSource !== 'Operator';
+    } catch {
+        return false;
+    }
 }
 
 function closeIfOpen(entity) {
@@ -254,8 +259,8 @@ async function createDataRouter(mediasoupRouter, logger = console) {
             player.consumer.on('message', (message) => {
                 const activeRoute = currentRoute;
                 if (player.active && !player.closed && players.get(player.id) === player) {
-                    if (isHomeReset(message)) {
-                        logger.warn(`Dropping temporarily disabled ResetHome from ${player.id}`);
+                    if (isUnattributedHomeReset(message)) {
+                        logger.warn(`Dropping unattributed ResetHome from ${player.id}`);
                         return;
                     }
                     sendToStreamer(activeRoute, Buffer.concat([createMultiplexHeader(player.id), message]));
@@ -327,5 +332,5 @@ module.exports = {
     createMultiplexHeader,
     parseMultiplexHeader,
     createRelayStatusMessage,
-    isHomeReset
+    isUnattributedHomeReset
 };

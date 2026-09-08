@@ -4,7 +4,7 @@ const test = require('node:test');
 
 const { runSafely } = require('../async_helpers');
 const { GenerationRegistry } = require('../generation_registry');
-const { createDataRouter, createMultiplexHeader, isHomeReset } = require('../data_router');
+const { createDataRouter, createMultiplexHeader, isUnattributedHomeReset } = require('../data_router');
 
 let nextEntityId = 0;
 
@@ -272,13 +272,16 @@ function uiInteraction(descriptor) {
     return Buffer.concat([Buffer.from([50]), Buffer.from(JSON.stringify(descriptor), 'utf16le')]);
 }
 
-test('temporary containment identifies every Home reset without blocking other camera actions', () => {
-    assert.equal(isHomeReset(uiInteraction({
+test('only attributed operator Home resets pass containment', () => {
+    assert.equal(isUnattributedHomeReset(uiInteraction({
         StreamCamera: { SetHome: true, HomeLocationX: 1, ResetHome: true }
     })), true);
-    assert.equal(isHomeReset(uiInteraction({ StreamCamera: { SetHome: true } })), false);
-    assert.equal(isHomeReset(uiInteraction({ StreamCamera: { ResetHome: true } })), true);
-    assert.equal(isHomeReset(uiInteraction({ StreamCamera: { GoToPreset: 'Hero' } })), false);
+    assert.equal(isUnattributedHomeReset(uiInteraction({ StreamCamera: { SetHome: true } })), false);
+    assert.equal(isUnattributedHomeReset(uiInteraction({ StreamCamera: { ResetHome: true } })), true);
+    assert.equal(isUnattributedHomeReset(uiInteraction({
+        StreamCamera: { ResetHome: true, ResetHomeSource: 'Operator' }
+    })), false);
+    assert.equal(isUnattributedHomeReset(uiInteraction({ StreamCamera: { GoToPreset: 'Hero' } })), false);
 });
 
 test('legacy combined Home reset is dropped before the streamer route', async () => {
@@ -293,6 +296,22 @@ test('legacy combined Home reset is dropped before the streamer route', async ()
 
     assert.equal(route.producer.messages.length, before);
     assert.match(harness.logger.warnings.at(-1), /LegacyTab/);
+});
+
+test('attributed operator Home reset reaches the streamer route', async () => {
+    const harness = await createHarness();
+    const { route } = await activateRoute(harness, 1);
+    const { player } = await activatePlayer(harness, 1, 'CurrentTab');
+    const reset = uiInteraction({
+        StreamCamera: { ReleaseRig: true, ResetHome: true, ResetHomeSource: 'Operator' }
+    });
+
+    player.consumer.emit('message', reset);
+
+    assert.deepEqual(
+        route.producer.messages.at(-1).message,
+        Buffer.concat([createMultiplexHeader('CurrentTab'), reset])
+    );
 });
 
 test('player and streamer messages route only through active current identities', async () => {
