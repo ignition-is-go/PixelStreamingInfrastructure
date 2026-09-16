@@ -17,17 +17,18 @@ module.exports = {
         signalServer = socket;
         streamer = upstream;
         dataRouter = router;
+    },
+    setPendingState(socket, upstream, router) {
+        signalServer = socket;
+        streamer = null;
+        dataRouter = router;
+        streamerGenerations.begin(upstream);
     }
 };`;
     const module = { exports: {} };
     const context = vm.createContext({
-        Buffer,
-        __dirname: path.dirname(serverPath),
-        __filename: serverPath,
-        clearTimeout() {},
-        console,
+        console: { error() {}, log() {}, warn() {} },
         module,
-        process,
         require: serverRequire,
         setTimeout() { return {}; }
     });
@@ -85,6 +86,33 @@ test('upstream discovery resubscribes on the same signalling socket after ICE lo
         'unsubscribe',
         'playerDisconnected',
         'stopStreaming',
+        'subscribe',
+        'playerConnected'
+    ]);
+});
+
+test('upstream discovery clears its subscription when ICE fails during offer setup', async () => {
+    const lifecycle = loadSfuLifecycle();
+    const signaller = new FakeSignaller();
+    const pendingUpstream = {
+        liveness: { stop() {} },
+        producers: [],
+        transport: {
+            closed: false,
+            close() { this.closed = true; }
+        }
+    };
+    lifecycle.setPendingState(signaller, pendingUpstream, { closeStreamer() {} });
+
+    await lifecycle.onStreamerList({ ids: ['DefaultStreamer'] });
+    lifecycle.onStreamerDisconnected();
+    await lifecycle.onStreamerList({ ids: ['DefaultStreamer'] });
+
+    assert.deepEqual(signaller.trace, [
+        'subscribe',
+        'playerConnected',
+        'unsubscribe',
+        'playerDisconnected',
         'subscribe',
         'playerConnected'
     ]);
