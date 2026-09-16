@@ -267,6 +267,10 @@ async function onStreamerOffer(msg) {
 function onStreamerDisconnected(notifySignalling = true) {
     console.log("Streamer disconnected");
 
+    if (notifySignalling) {
+        sendSignalling({ type: 'unsubscribe' });
+    }
+
     if (streamerGenerations.pending !== null) {
         const pending = streamerGenerations.cancelPending();
         pending.cancelled = true;
