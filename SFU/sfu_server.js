@@ -759,11 +759,12 @@ async function onStreamerICEStateChange(upstream, iceState) {
 async function createWebRtcTransport(identifier, iceStateHandler, sctpStateHandler) {
     const {
         listenIps,
+        listenInfos,
         initialAvailableOutgoingBitrate
     } = config.mediasoup.webRtcTransport;
 
     const transport = await mediasoupRouter.createWebRtcTransport({
-        listenIps: listenIps,
+        ...(listenInfos ? { listenInfos } : { listenIps }),
         enableUdp: true,
         enableTcp: false,
         preferUdp: true,

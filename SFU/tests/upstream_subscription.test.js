@@ -6,13 +6,17 @@ const test = require('node:test');
 const vm = require('node:vm');
 const WebSocket = require('ws');
 
-function loadSfuLifecycle() {
+function loadSfuLifecycle(webRtcTransport) {
     const serverPath = path.resolve(__dirname, '..', 'sfu_server.js');
     const serverRequire = createRequire(serverPath);
     const source = `${fs.readFileSync(serverPath, 'utf8')}
 module.exports = {
     onStreamerDisconnected,
     onStreamerList,
+    createWebRtcTransport,
+    setMediasoupRouter(router) {
+        mediasoupRouter = router;
+    },
     setState(socket, upstream, router) {
         signalServer = socket;
         streamer = upstream;
@@ -29,12 +33,48 @@ module.exports = {
     const context = vm.createContext({
         console: { error() {}, log() {}, warn() {} },
         module,
-        require: serverRequire,
+        require(specifier) {
+            if (specifier === './config' && webRtcTransport) {
+                return { mediasoup: { webRtcTransport } };
+            }
+            return serverRequire(specifier);
+        },
         setTimeout() { return {}; }
     });
 
     vm.runInContext(source, context, { filename: serverPath });
     return module.exports;
+}
+
+for (const modern of [false, true]) {
+    test(`transport preserves ${modern ? 'listenInfos socket options' : 'legacy listenIps'}`, async () => {
+        const listenIps = [{ ip: '127.0.0.1', announcedIp: '127.0.0.1' }];
+        const listenInfos = [{
+            protocol: 'udp',
+            ip: '127.0.0.1',
+            announcedAddress: '127.0.0.1',
+            recvBufferSize: 8 * 1024 * 1024
+        }];
+        const settings = {
+            listenIps,
+            initialAvailableOutgoingBitrate: 1000000,
+            ...(modern ? { listenInfos } : {})
+        };
+        const lifecycle = loadSfuLifecycle(settings);
+        let received;
+        const transport = { on() {} };
+        lifecycle.setMediasoupRouter({
+            async createWebRtcTransport(options) {
+                received = options;
+                return transport;
+            }
+        });
+        assert.equal(await lifecycle.createWebRtcTransport('test'), transport);
+        assert.equal(received.initialAvailableOutgoingBitrate, 1000000);
+        assert.equal(received.enableSctp, true);
+        assert.equal(received[modern ? 'listenInfos' : 'listenIps'], modern ? listenInfos : listenIps);
+        assert.equal(Object.hasOwn(received, modern ? 'listenIps' : 'listenInfos'), false);
+    });
 }
 
 class FakeSignaller {
