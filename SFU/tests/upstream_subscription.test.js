@@ -31,11 +31,12 @@ module.exports = {
 };`;
     const module = { exports: {} };
     const context = vm.createContext({
+        process: { on() {} },
         console: { error() {}, log() {}, warn() {} },
         module,
         require(specifier) {
-            if (specifier === './config' && webRtcTransport) {
-                return { mediasoup: { webRtcTransport } };
+            if (specifier === './config') {
+                return { subscribeStreamerId: 'DefaultStreamer', mediasoup: { webRtcTransport } };
             }
             return serverRequire(specifier);
         },

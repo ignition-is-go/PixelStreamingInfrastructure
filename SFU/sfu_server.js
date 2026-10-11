@@ -8,6 +8,7 @@ const { runSafely } = require('./async_helpers');
 const { GenerationRegistry } = require('./generation_registry');
 const { SignallingWatchdog, reconnectDelayMs } = require('./signalling_watchdog');
 const { StreamerLivenessMonitor } = require('./streamer_liveness');
+const { snapshotMedia } = require('./media_diagnostics');
 
 if (!config.retrySubscribeDelaySecs) {
     config.retrySubscribeDelaySecs = 10;
@@ -42,6 +43,12 @@ const streamerGenerations = new GenerationRegistry();
 let peers = new Map();
 let dataRouter;
 let scalabilityMode = "L1T1"; // Scalability mode defaults to L1T1 and is set by the offer from the streamer
+
+process.on('SIGUSR2', () => {
+    snapshotMedia(streamer, peers)
+        .then(snapshot => console.log(JSON.stringify({ event: 'sfu-media-diagnostics', ...snapshot })))
+        .catch(error => console.error(`SFU media diagnostics failed: ${error.message}`));
+});
 
 function sendSignalling(message) {
     const socket = signalServer;
