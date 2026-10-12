@@ -115,6 +115,50 @@ function relayStatuses(route) {
         }));
 }
 
+test('player setup without a streamer route returns null and can retry after activation', async () => {
+    const harness = await createHarness();
+    const playerData = new MockEntity('early-player-data');
+
+    assert.equal(await harness.router.preparePlayer(playerData, 'PlayerEarly', 1), null);
+    assert.equal(harness.transport.consumers.length, 0);
+    assert.equal(harness.transport.producers.length, 0);
+
+    const { route } = await activateRoute(harness, 1);
+    const player = await harness.router.preparePlayer(playerData, 'PlayerEarly', 1);
+    assert.equal(harness.router.activatePlayer(player), true);
+    assert.deepEqual(relayStatuses(route), [{ playerId: 'PlayerEarly', status: 1 }]);
+});
+
+test('player messages during a streamer gap are dropped and resume on the replacement route', async () => {
+    const harness = await createHarness();
+    const { route } = await activateRoute(harness, 1);
+    const { player } = await activatePlayer(harness, 1);
+    harness.router.closeStreamer(1);
+    const messagesBeforeGap = route.producer.messages.length;
+
+    player.consumer.emit('message', Buffer.from('during gap'));
+    assert.equal(route.producer.messages.length, messagesBeforeGap);
+
+    const replacement = await activateRoute(harness, 2);
+    const message = Buffer.from('after reconnect');
+    player.consumer.emit('message', message);
+    assert.deepEqual(
+        replacement.route.producer.messages.at(-1).message,
+        Buffer.concat([createMultiplexHeader('Player1'), message])
+    );
+});
+
+test('player activation after streamer teardown closes prepared resources', async () => {
+    const harness = await createHarness();
+    await activateRoute(harness, 1);
+    const player = await harness.router.preparePlayer(new MockEntity('player-data'), 'Player1', 1);
+    harness.router.closeStreamer(1);
+
+    assert.equal(harness.router.activatePlayer(player), false);
+    assert.equal(player.consumer.closed, true);
+    assert.equal(player.producer.closed, true);
+});
+
 test('late player setup fails closed when streamer tears down during consumeData', async () => {
     const harness = await createHarness();
     await activateRoute(harness, 1);
