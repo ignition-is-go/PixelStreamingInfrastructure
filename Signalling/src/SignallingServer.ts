@@ -39,6 +39,9 @@ export interface IServerConfig {
     // The peer configuration object to send to peers in the config message when they connect.
     peerOptions: unknown;
 
+    // Generate options at connection time, for example for expiring TURN credentials.
+    peerOptionsProvider?: () => object;
+
     // Additional websocket options for the streamer listening websocket.
     streamerWsOptions?: wslib.ServerOptions;
 
@@ -149,7 +152,9 @@ export class SignallingServer {
         // it doesnt play nice with mergePartial so we just add it verbatim
         const message: Messages.config = MessageHelpers.createMessage(Messages.config, this.protocolConfig);
         // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-        message.peerConnectionOptions = this.protocolConfig['peerConnectionOptions'];
+        message.peerConnectionOptions = this.config.peerOptionsProvider
+            ? this.config.peerOptionsProvider()
+            : this.protocolConfig['peerConnectionOptions'];
         connection.sendMessage(message);
     }
 

@@ -20,6 +20,7 @@ import playerByIdHandler from './paths/players/{playerId}';
 import statusHandler from './paths/status';
 import streamersHandler from './paths/streamers';
 import streamerByIdHandler from './paths/streamers/{streamerId}';
+import { loadTurnPeerOptionsProvider } from './TurnCredentials';
 
 // eslint-disable-next-line  @typescript-eslint/no-unsafe-assignment
 const pjson = require('../package.json');
@@ -283,6 +284,11 @@ const serverOpts: IServerConfig = {
     maxSubscribers: options.max_players,
     playerKeepaliveTimeout: Number(options.player_keepalive_timeout)
 };
+
+if (process.env.TURN_CONFIG_FILE) {
+    serverOpts.peerOptionsProvider = loadTurnPeerOptionsProvider(process.env.TURN_CONFIG_FILE);
+    serverOpts.peerOptions = {};
+}
 
 if (options.sfu_subscribe_barriers) {
     try {

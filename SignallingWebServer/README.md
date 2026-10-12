@@ -119,3 +119,65 @@ The previous reference signalling server was called Cirrus (UE 5.4 and earlier).
 
 Differences of behaviour from the old Cirrus server are described [here](from_cirrus.md).
 
+
+## Expiring TURN credentials
+
+Set `TURN_CONFIG_FILE` to a server-only JSON file to replace the startup script's
+synthesized ICE configuration with explicit relay endpoints and fresh credentials
+for each player, streamer, or SFU connection:
+
+```json
+{
+    "urls": [
+        "turn:relay.example.com:3478?transport=udp",
+        "turn:relay.example.com:3478?transport=tcp",
+        "turns:relay.example.com:443?transport=tcp"
+    ],
+    "stunUrls": ["stun:stun.l.google.com:19302"],
+    "secretFile": "secret",
+    "ttlSeconds": 86400
+}
+```
+
+`secretFile` resolves relative to the JSON file. Its contents must match coturn's
+`static-auth-secret` with `use-auth-secret` enabled. Keep both files outside the
+HTTP root, mount them read-only, and restrict the secret to the server user.
+The shared secret stays inside a closure; clients receive only expiring HMAC
+credentials following [coturn's TURN REST authentication](https://github.com/coturn/coturn/wiki/turnserver#turn-rest-api).
+Outgoing config bodies are omitted from protocol logs. The REST config endpoint
+does not issue or expose dynamic credentials.
+
+This mode replaces `peer_options` and `peer_options_file`; it preserves the default
+ICE policy, allowing direct connections. When unset, existing configuration
+behavior is unchanged. The Bash startup script suppresses its synthesized TURN
+options when `TURN_CONFIG_FILE` is set. Invalid configuration fails before the
+server opens listening sockets. Restart the signaller after changing the files.
+
+Choose the lifetime explicitly between 60 seconds and seven days. Each new
+signalling connection gets fresh credentials; an already connected client does
+not receive proactive credential refresh. Sessions that need a new TURN allocation
+after expiry must reconnect to signalling. This is not an unlimited-session refresh
+mechanism. Verify the intended session duration before enabling it.
+
+Build and test with the version in `NODE_VERSION`:
+
+```sh
+npm run build:cjs --workspace Common
+npm test --workspace Signalling
+npm test --workspace SignallingWebServer
+```
+
+For an isolated signaller configured with a real relay, install Playwright and its
+Chromium browser in your test environment, then run:
+
+```sh
+node SignallingWebServer/tests/validate_turn_relay.cjs ws://127.0.0.1:18080
+```
+
+The validator accepts only a local signaller URL. For each advertised TURN URL it
+connects two synthetic Chromium peers, forces relay on both ends, verifies ten
+data-channel echoes and the selected candidate types, then closes both peers.
+It does not subscribe to a streamer, change a server, or bypass TLS verification.
+`PLAYWRIGHT_MODULE` can point to an existing Playwright installation. This proves
+relay connectivity, not sustained video quality or the cause of established-stream
+freezes.

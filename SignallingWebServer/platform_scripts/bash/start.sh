@@ -11,6 +11,10 @@ setup_turn_stun "bg"
 
 TEST_ARGS=($SERVER_ARGS)
 SKIP_PEER_ARGS=false
+if [[ -n "${TURN_CONFIG_FILE}" ]]; then
+    SKIP_PEER_ARGS=true
+    unset PEER_OPTIONS
+fi
 for arg in "${TEST_ARGS[@]}"; do
     if [[ "$arg" == --peer_options* ]]; then
         SKIP_PEER_ARGS=true
@@ -38,4 +42,3 @@ fi
 build_wilbur
 print_config
 start_wilbur
-
