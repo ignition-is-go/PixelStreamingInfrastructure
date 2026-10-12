@@ -86,7 +86,7 @@ async function createDataRouter(mediasoupRouter, logger = console) {
     let currentRoute = null;
 
     function isCurrentRoute(route) {
-        return currentRoute === route && !route.closed;
+        return route !== null && currentRoute === route && !route.closed;
     }
 
     function sendToStreamer(route, message) {
