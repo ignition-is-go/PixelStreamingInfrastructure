@@ -181,3 +181,15 @@ It does not subscribe to a streamer, change a server, or bypass TLS verification
 `PLAYWRIGHT_MODULE` can point to an existing Playwright installation. This proves
 relay connectivity, not sustained video quality or the cause of established-stream
 freezes.
+
+For the expiry boundary, run a separate isolated signaller with `ttlSeconds: 60`:
+
+```sh
+node SignallingWebServer/tests/validate_turn_expiry.cjs ws://127.0.0.1:18080
+```
+
+This bounded UDP test keeps a synthetic pair alive through credential expiry,
+attempts an ICE restart, tries a new pair with expired credentials, and then
+obtains fresh credentials over WebSocket for another pair. It refuses credentials
+with more than 90 seconds remaining. Existing-pair survival does not establish
+long-term allocation refresh or automatic client renewal.
