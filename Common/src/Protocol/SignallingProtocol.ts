@@ -95,6 +95,7 @@ export class SignallingProtocol extends EventEmitter {
     sendMessage(msg: BaseMessage): void {
         this.transport.sendMessage(JSON.stringify(msg));
         this.transport.emit('out', msg); // emit this for listeners listening to outgoing messages
-        Logger.Debug('Protocol sent => \n' + JSON.stringify(msg, undefined, 4));
+        const loggedMessage = msg.type === 'config' ? { type: msg.type } : msg;
+        Logger.Debug('Protocol sent => \n' + JSON.stringify(loggedMessage, undefined, 4));
     }
 }

@@ -44,7 +44,7 @@ export function logOutgoing(sender: IMessageLogger, message: BaseMessage): void 
         event: 'proto_message',
         direction: 'outgoing',
         sender: sender.getReadableIdentifier(),
-        protoMessage: message
+        protoMessage: message.type === 'config' ? { type: message.type } : message
     });
 }
 
