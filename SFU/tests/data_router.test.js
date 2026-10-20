@@ -115,6 +115,12 @@ function relayStatuses(route) {
         }));
 }
 
+function routedPlayerMessages(route) {
+    return route.producer.messages
+        .filter(({ message }) => message[0] === 199)
+        .map(({ message }) => message.subarray(3 + message.readUInt16LE(1)));
+}
+
 test('player setup without a streamer route returns null and can retry after activation', async () => {
     const harness = await createHarness();
     const playerData = new MockEntity('early-player-data');
@@ -290,6 +296,145 @@ test('player removal is idempotent and announced only on its owning route', asyn
         { playerId: 'PlayerRemove', status: 1 },
         { playerId: 'PlayerRemove', status: 0 }
     ]);
+});
+
+test('abrupt client gone releases held input before relay removal without frontend cleanup', async () => {
+    const harness = await createHarness();
+    const { route } = await activateRoute(harness, 1);
+    const { dataProducer, player } = await activatePlayer(harness, 1, 'PlayerHoldingW');
+    const keyDown = Buffer.from([60, 87, 0]);
+    const keyUp = Buffer.from([61, 87]);
+
+    player.consumer.emit('message', keyDown);
+    dataProducer.close();
+
+    const streamerMessages = route.producer.messages.map(({ message }) => {
+        if (message[0] !== 199) {
+            return Buffer.from([message[0], message.at(-1)]);
+        }
+        return message.subarray(3 + message.readUInt16LE(1));
+    });
+    assert.deepEqual(
+        streamerMessages,
+        [
+            Buffer.from([198, 1]),
+            keyDown,
+            keyUp,
+            Buffer.from([198, 0])
+        ]
+    );
+    assert.deepEqual(relayStatuses(route), [
+        { playerId: 'PlayerHoldingW', status: 1 },
+        { playerId: 'PlayerHoldingW', status: 0 }
+    ]);
+});
+
+test('abrupt client gone releases held mouse buttons at their last down position', async () => {
+    const harness = await createHarness();
+    const { route } = await activateRoute(harness, 1);
+    const { dataProducer, player } = await activatePlayer(harness, 1, 'PlayerHoldingMouse');
+    const mouseDown = Buffer.from([72, 0, 52, 18, 120, 86]);
+    const mouseUp = Buffer.from([73, 0, 52, 18, 120, 86]);
+
+    player.consumer.emit('message', mouseDown);
+    dataProducer.close();
+
+    assert.deepEqual(routedPlayerMessages(route), [mouseDown, mouseUp]);
+});
+
+test('normal input release prevents a duplicate release during disposal', async () => {
+    const harness = await createHarness();
+    const { route } = await activateRoute(harness, 1);
+    const { dataProducer, player } = await activatePlayer(harness, 1, 'PlayerReleasedW');
+    const keyDown = Buffer.from([60, 87, 0]);
+    const keyUp = Buffer.from([61, 87]);
+
+    player.consumer.emit('message', keyDown);
+    player.consumer.emit('message', keyUp);
+    dataProducer.close();
+    dataProducer.close();
+
+    assert.deepEqual(routedPlayerMessages(route), [keyDown, keyUp]);
+});
+
+test('held input from a stale route is not released into its replacement', async () => {
+    const harness = await createHarness();
+    const oldRoute = await activateRoute(harness, 1);
+    const { dataProducer, player } = await activatePlayer(harness, 1, 'PlayerStaleRoute');
+    const keyDown = Buffer.from([60, 87, 0]);
+
+    player.consumer.emit('message', keyDown);
+    const replacement = await activateRoute(harness, 2);
+    dataProducer.close();
+
+    assert.deepEqual(routedPlayerMessages(oldRoute.route), [keyDown]);
+    assert.deepEqual(routedPlayerMessages(replacement.route), []);
+});
+
+test('disconnecting one holder does not release another active player input', async () => {
+    const harness = await createHarness();
+    const { route } = await activateRoute(harness, 1);
+    const first = await activatePlayer(harness, 1, 'PlayerFirst');
+    const second = await activatePlayer(harness, 1, 'PlayerSecond');
+    const keyDown = Buffer.from([60, 87, 0]);
+
+    first.player.consumer.emit('message', keyDown);
+    second.player.consumer.emit('message', keyDown);
+    first.dataProducer.close();
+    assert.deepEqual(routedPlayerMessages(route), [keyDown, keyDown]);
+
+    second.dataProducer.close();
+    second.dataProducer.close();
+    assert.deepEqual(routedPlayerMessages(route), [keyDown, keyDown, Buffer.from([61, 87])]);
+});
+
+test('normal release from one holder waits for the final holder release', async () => {
+    const harness = await createHarness();
+    const { route } = await activateRoute(harness, 1);
+    const first = await activatePlayer(harness, 1, 'PlayerFirstRelease');
+    const second = await activatePlayer(harness, 1, 'PlayerLastRelease');
+    const keyDown = Buffer.from([60, 87, 0]);
+    const keyUp = Buffer.from([61, 87]);
+
+    first.player.consumer.emit('message', keyDown);
+    second.player.consumer.emit('message', keyDown);
+    first.player.consumer.emit('message', keyUp);
+    assert.deepEqual(routedPlayerMessages(route), [keyDown, keyDown]);
+
+    second.player.consumer.emit('message', keyUp);
+    assert.deepEqual(routedPlayerMessages(route), [keyDown, keyDown, keyUp]);
+});
+
+test('normal release from one holder leaves disconnect cleanup to release the last holder', async () => {
+    const harness = await createHarness();
+    const { route } = await activateRoute(harness, 1);
+    const first = await activatePlayer(harness, 1, 'PlayerNormalRelease');
+    const second = await activatePlayer(harness, 1, 'PlayerDisconnectRelease');
+    const mouseDown = Buffer.from([72, 0, 52, 18, 120, 86]);
+    const mouseUp = Buffer.from([73, 0, 52, 18, 120, 86]);
+
+    first.player.consumer.emit('message', mouseDown);
+    second.player.consumer.emit('message', mouseDown);
+    first.player.consumer.emit('message', mouseUp);
+    second.dataProducer.close();
+
+    assert.deepEqual(routedPlayerMessages(route), [mouseDown, mouseDown, mouseUp]);
+});
+
+test('pending release from a reconnected player does not release another current holder', async () => {
+    const harness = await createHarness();
+    const { route } = await activateRoute(harness, 1);
+    const holder = await activatePlayer(harness, 1, 'PlayerHoldingW');
+    const reconnect = await activatePlayer(harness, 1, 'PlayerReconnect');
+    const keyDown = Buffer.from([60, 87, 0]);
+    const keyUp = Buffer.from([61, 87]);
+
+    holder.player.consumer.emit('message', keyDown);
+    reconnect.player.consumer.emit('message', keyUp);
+    assert.deepEqual(routedPlayerMessages(route), [keyDown]);
+
+    holder.dataProducer.close();
+    assert.deepEqual(routedPlayerMessages(route), [keyDown, keyUp]);
 });
 
 test('short and oversized multiplex messages are dropped without closing the route', async () => {
