@@ -1,6 +1,10 @@
 const MULTIPLEX_MESSAGE_ID = 199; // ID | 2 byte length | PlayerId | Original message
 const CHANNEL_RELAY_STATUS_MESSAGE_ID = 198; // ID | 2 byte length | PlayerId | 1 byte flag
 const UI_INTERACTION_MESSAGE_ID = 50;
+const KEY_DOWN_MESSAGE_ID = 60;
+const KEY_UP_MESSAGE_ID = 61;
+const MOUSE_DOWN_MESSAGE_ID = 72;
+const MOUSE_UP_MESSAGE_ID = 73;
 
 // Only an explicitly attributed operator action may move the camera Home. This
 // keeps reconnecting and legacy clients from releasing the active shot while
@@ -98,6 +102,75 @@ async function createDataRouter(mediasoupRouter, logger = console) {
         return true;
     }
 
+    function updateHeldInput(player, route, message) {
+        if (!Buffer.isBuffer(message)) {
+            return;
+        }
+
+        const type = message[0];
+        if (type === KEY_DOWN_MESSAGE_ID && message.length === 3) {
+            player.heldInput.set(`key:${message[1]}`, {
+                generation: route.generation,
+                release: Buffer.from([KEY_UP_MESSAGE_ID, message[1]])
+            });
+        } else if (type === KEY_UP_MESSAGE_ID && message.length === 2) {
+            player.heldInput.delete(`key:${message[1]}`);
+        } else if (type === MOUSE_DOWN_MESSAGE_ID && message.length === 6) {
+            player.heldInput.set(`mouse:${message[1]}`, {
+                generation: route.generation,
+                release: Buffer.from([MOUSE_UP_MESSAGE_ID, ...message.subarray(1)])
+            });
+        } else if (type === MOUSE_UP_MESSAGE_ID && message.length === 6) {
+            player.heldInput.delete(`mouse:${message[1]}`);
+        }
+    }
+
+    function suppressSharedInputRelease(player, route, message) {
+        if (!Buffer.isBuffer(message)) {
+            return false;
+        }
+
+        const type = message[0];
+        let input;
+        if (type === KEY_UP_MESSAGE_ID && message.length === 2) {
+            input = `key:${message[1]}`;
+        } else if (type === MOUSE_UP_MESSAGE_ID && message.length === 6) {
+            input = `mouse:${message[1]}`;
+        } else {
+            return false;
+        }
+
+        const heldByAnotherPlayer = [...players.values()].some((otherPlayer) => {
+            if (otherPlayer === player) {
+                return false;
+            }
+            return otherPlayer.heldInput.get(input)?.generation === route?.generation;
+        });
+        if (!heldByAnotherPlayer) {
+            return false;
+        }
+
+        player.heldInput.delete(input);
+        return true;
+    }
+
+    function releaseHeldInput(player, route) {
+        for (const [input, held] of player.heldInput) {
+            if (held.generation !== route?.generation) {
+                continue;
+            }
+
+            const heldByAnotherPlayer = [...players.values()].some((otherPlayer) => {
+                const otherHeld = otherPlayer.heldInput.get(input);
+                return otherHeld?.generation === route.generation;
+            });
+            if (!heldByAnotherPlayer) {
+                sendToStreamer(route, Buffer.concat([createMultiplexHeader(player.id), held.release]));
+            }
+        }
+        player.heldInput.clear();
+    }
+
     function closeRoute(route) {
         if (!route) {
             return;
@@ -127,7 +200,10 @@ async function createDataRouter(mediasoupRouter, logger = console) {
 
             const route = currentRoute;
             if (announceRemoval && player.announcedGeneration === route?.generation) {
+                releaseHeldInput(player, route);
                 sendToStreamer(route, createRelayStatusMessage(player.id, 0));
+            } else {
+                player.heldInput.clear();
             }
         }
 
@@ -239,7 +315,8 @@ async function createDataRouter(mediasoupRouter, logger = console) {
             producer: null,
             active: false,
             closed: false,
-            announcedGeneration: null
+            announcedGeneration: null,
+            heldInput: new Map()
         };
         players.set(playerId, player);
         dataProducer.observer.once('close', () => disposePlayer(player));
@@ -263,7 +340,12 @@ async function createDataRouter(mediasoupRouter, logger = console) {
                         logger.warn(`Dropping unattributed ResetHome from ${player.id}`);
                         return;
                     }
-                    sendToStreamer(activeRoute, Buffer.concat([createMultiplexHeader(player.id), message]));
+                    if (suppressSharedInputRelease(player, activeRoute, message)) {
+                        return;
+                    }
+                    if (sendToStreamer(activeRoute, Buffer.concat([createMultiplexHeader(player.id), message]))) {
+                        updateHeldInput(player, activeRoute, message);
+                    }
                 }
             });
 
