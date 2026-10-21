@@ -8,6 +8,7 @@ const { runSafely } = require('./async_helpers');
 const { GenerationRegistry } = require('./generation_registry');
 const { SignallingWatchdog, reconnectDelayMs } = require('./signalling_watchdog');
 const { StreamerLivenessMonitor } = require('./streamer_liveness');
+const { traceVideoConsumer, traceVideoProducer } = require('./video_recovery_trace');
 
 if (!config.retrySubscribeDelaySecs) {
     config.retrySubscribeDelaySecs = 10;
@@ -234,6 +235,12 @@ async function onStreamerOffer(msg) {
         }
 
         candidate.producers = offerResult.producers;
+        for (const producer of candidate.producers) {
+            traceVideoProducer(producer, {
+                enabled: config.traceVideoRecovery,
+                generation: candidate.generation
+            });
+        }
         candidate.dataEnabled = offerResult.dataEnabled;
         if (!streamerGenerations.activate(candidate)) {
             throw new Error(`streamer generation ${candidate.generation} was superseded during setup`);
@@ -402,6 +409,11 @@ async function onPeerConnected(peerId) {
                 closePeer(peer);
                 return;
             }
+            traceVideoConsumer(consumer, {
+                enabled: config.traceVideoRecovery,
+                peerId: peer.id,
+                generation: peer.streamerGeneration
+            });
             consumer.observer.on("layerschange", function() { console.log("layer changed!", consumer.currentLayers); });
             peer.sdpEndpoint.addConsumer(consumer);
             peer.consumers.push(consumer);
