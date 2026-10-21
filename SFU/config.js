@@ -33,6 +33,8 @@ const config = {
   // Allow a brief ICE interruption, but rebuild an upstream generation that stays dead.
   streamerDisconnectGraceSecs: 5,
 
+  traceVideoRecovery: false,
+
   // Enable SVC support
   enableSVC: true,
 
