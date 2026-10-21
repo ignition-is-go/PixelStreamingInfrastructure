@@ -84,6 +84,15 @@ test('real worker reports consumer PLI and its H264 keyframe boundary', async ()
             receipt.upstreamGeneration === 4 &&
             receipt.producerId === producer.id
         ));
+        const stats = receipts.find((receipt) => receipt.event === 'consumer_feedback_stats');
+        assert(stats);
+        assert.equal(stats.peerId, 'worker-peer');
+        assert.equal(stats.upstreamGeneration, 4);
+        assert.equal(stats.consumerId, consumer.id);
+        assert.equal(stats.producerId, producer.id);
+        assert.equal(typeof stats.packetCount, 'number');
+        assert.equal(typeof stats.byteCount, 'number');
+        assert.equal(typeof stats.bitrate, 'number');
         assert.deepEqual(errors, []);
     } finally {
         worker.close();

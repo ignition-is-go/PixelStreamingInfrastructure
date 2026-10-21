@@ -85,6 +85,49 @@ function traceVideoConsumer(consumer, {
     // mediasoup 3.15.5 emits each Consumer trace object twice. Remembering the
     // object avoids double-counting without merging distinct feedback packets.
     const seen = new WeakSet();
+    let statsPending = false;
+    const traceStats = (trace) => {
+        if (statsPending) {
+            return;
+        }
+        statsPending = true;
+        void Promise.resolve()
+            .then(() => consumer.getStats())
+            .then((stats) => stats.find((record) => record.type === 'outbound-rtp'))
+            .then((stats) => {
+                if (!stats) {
+                    return;
+                }
+                writeLog(logger, 'log', LOG_PREFIX, {
+                    event: 'consumer_feedback_stats',
+                    feedback: trace.type,
+                    observedAt: now(),
+                    traceTimestamp: trace.timestamp,
+                    direction: trace.direction,
+                    peerId,
+                    upstreamGeneration: generation,
+                    consumerId: consumer.id,
+                    producerId: consumer.producerId,
+                    ssrc: stats.ssrc,
+                    packetsLost: stats.packetsLost,
+                    fractionLost: stats.fractionLost,
+                    nackCount: stats.nackCount,
+                    nackPacketCount: stats.nackPacketCount,
+                    pliCount: stats.pliCount,
+                    firCount: stats.firCount,
+                    packetsRetransmitted: stats.packetsRetransmitted,
+                    score: stats.score,
+                    roundTripTime: stats.roundTripTime ?? null,
+                    byteCount: stats.byteCount,
+                    packetCount: stats.packetCount,
+                    bitrate: stats.bitrate
+                });
+            })
+            .catch((error) => reportFailure(logger, 'consumer_stats', error))
+            .finally(() => {
+                statsPending = false;
+            });
+    };
     const handler = (trace) => {
         try {
             if (!trace || (trace.type !== 'pli' && trace.type !== 'fir')) {
@@ -108,6 +151,7 @@ function traceVideoConsumer(consumer, {
                 producerId: consumer.producerId,
                 ssrc: trace.info?.ssrc
             });
+            traceStats(trace);
         } catch (error) {
             reportFailure(logger, 'consumer_trace', error);
         }
