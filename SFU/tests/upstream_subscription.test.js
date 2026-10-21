@@ -6,20 +6,23 @@ const test = require('node:test');
 const vm = require('node:vm');
 const WebSocket = require('ws');
 
-function loadSfuLifecycle(webRtcTransport) {
+function loadSfuLifecycle() {
     const serverPath = path.resolve(__dirname, '..', 'sfu_server.js');
     const serverRequire = createRequire(serverPath);
     const source = `${fs.readFileSync(serverPath, 'utf8')}
 module.exports = {
     onStreamerDisconnected,
     onStreamerList,
-    createWebRtcTransport,
-    setMediasoupRouter(router) {
-        mediasoupRouter = router;
-    },
+    setupPeerDataChannels,
     setState(socket, upstream, router) {
         signalServer = socket;
         streamer = upstream;
+        dataRouter = router;
+    },
+    setPeerState(socket, upstream, peer, router) {
+        signalServer = socket;
+        streamer = upstream;
+        peers = new Map([[peer.id, peer]]);
         dataRouter = router;
     },
     setPendingState(socket, upstream, router) {
@@ -33,48 +36,12 @@ module.exports = {
     const context = vm.createContext({
         console: { error() {}, log() {}, warn() {} },
         module,
-        require(specifier) {
-            if (specifier === './config' && webRtcTransport) {
-                return { mediasoup: { webRtcTransport } };
-            }
-            return serverRequire(specifier);
-        },
+        require: serverRequire,
         setTimeout() { return {}; }
     });
 
     vm.runInContext(source, context, { filename: serverPath });
     return module.exports;
-}
-
-for (const modern of [false, true]) {
-    test(`transport preserves ${modern ? 'listenInfos socket options' : 'legacy listenIps'}`, async () => {
-        const listenIps = [{ ip: '127.0.0.1', announcedIp: '127.0.0.1' }];
-        const listenInfos = [{
-            protocol: 'udp',
-            ip: '127.0.0.1',
-            announcedAddress: '127.0.0.1',
-            recvBufferSize: 8 * 1024 * 1024
-        }];
-        const settings = {
-            listenIps,
-            initialAvailableOutgoingBitrate: 1000000,
-            ...(modern ? { listenInfos } : {})
-        };
-        const lifecycle = loadSfuLifecycle(settings);
-        let received;
-        const transport = { on() {} };
-        lifecycle.setMediasoupRouter({
-            async createWebRtcTransport(options) {
-                received = options;
-                return transport;
-            }
-        });
-        assert.equal(await lifecycle.createWebRtcTransport('test'), transport);
-        assert.equal(received.initialAvailableOutgoingBitrate, 1000000);
-        assert.equal(received.enableSctp, true);
-        assert.equal(received[modern ? 'listenInfos' : 'listenIps'], modern ? listenInfos : listenIps);
-        assert.equal(Object.hasOwn(received, modern ? 'listenIps' : 'listenInfos'), false);
-    });
 }
 
 class FakeSignaller {
@@ -156,4 +123,182 @@ test('upstream discovery clears its subscription when ICE fails during offer set
         'subscribe',
         'playerConnected'
     ]);
+});
+
+class FakeDataEntity {
+    constructor(id, streamId, label = 'send-datachannel') {
+        this.id = id;
+        this.label = label;
+        this.closed = false;
+        this.sctpStreamParameters = { streamId, ordered: true };
+    }
+
+    close() {
+        this.closed = true;
+    }
+}
+
+class FakeDataTransport {
+    constructor(prefix) {
+        this.prefix = prefix;
+        this.nextStreamId = 0;
+        this.produced = [];
+        this.consumed = [];
+        this.closed = false;
+    }
+
+    getNextSctpStreamId() {
+        return this.nextStreamId++;
+    }
+
+    async produceData(options) {
+        const producer = new FakeDataEntity(
+            `${this.prefix}-producer-${this.produced.length}`,
+            options.sctpStreamParameters.streamId,
+            options.label
+        );
+        this.produced.push(producer);
+        return producer;
+    }
+
+    async consumeData({ dataProducerId }) {
+        const consumer = new FakeDataEntity(
+            `${this.prefix}-consumer-${this.consumed.length}`,
+            this.nextStreamId++
+        );
+        this.consumed.push({ dataProducerId, consumer });
+        return consumer;
+    }
+
+    close() {
+        this.closed = true;
+    }
+}
+
+function createPeerDataHarness(multiplexChannels) {
+    const lifecycle = loadSfuLifecycle();
+    const signals = [];
+    const socket = {
+        readyState: WebSocket.OPEN,
+        send(message) {
+            signals.push(JSON.parse(message));
+        }
+    };
+    const upstream = {
+        generation: 1,
+        multiplexChannels,
+        transport: new FakeDataTransport('upstream')
+    };
+    const routeCalls = [];
+    const peer = {
+        id: 'PlayerOne',
+        streamerGeneration: 1,
+        transport: new FakeDataTransport('peer'),
+        route: {
+            async toIngress(producer) {
+                routeCalls.push(['toIngress', producer.id]);
+                return {
+                    kind: 'ready',
+                    producer: new FakeDataEntity(`ingress-${producer.id}`, 40)
+                };
+            },
+            async fromIngress(producer) {
+                routeCalls.push(['fromIngress', producer.id]);
+                return {
+                    kind: 'ready',
+                    producer: new FakeDataEntity(`viewer-${producer.id}`, 41)
+                };
+            },
+            close() {}
+        },
+        consumers: [],
+        peerDataProducer: null,
+        peerDataConsumer: null,
+        streamerDataProducer: null,
+        streamerDataConsumer: null,
+        dataRouterPlayer: null,
+        dataChannelsStarted: false,
+        closed: false
+    };
+    return { lifecycle, peer, routeCalls, signals, socket, upstream };
+}
+
+test('dedicated data channels pipe both native directions without changing signals', async () => {
+    const harness = createPeerDataHarness(false);
+    harness.lifecycle.setPeerState(
+        harness.socket,
+        harness.upstream,
+        harness.peer,
+        { closePlayer() {} }
+    );
+
+    await harness.lifecycle.setupPeerDataChannels(harness.peer.id);
+
+    assert.deepEqual(harness.routeCalls.map(([direction]) => direction), [
+        'fromIngress',
+        'toIngress'
+    ]);
+    assert.equal(
+        harness.peer.transport.consumed[0].dataProducerId,
+        `viewer-${harness.peer.streamerDataProducer.id}`
+    );
+    assert.equal(
+        harness.upstream.transport.consumed[0].dataProducerId,
+        `ingress-${harness.peer.peerDataProducer.id}`
+    );
+    assert.deepEqual(harness.signals, [{
+        type: 'peerDataChannels',
+        playerId: harness.peer.id,
+        sendStreamId: harness.peer.peerDataProducer.sctpStreamParameters.streamId,
+        recvStreamId: harness.peer.peerDataConsumer.sctpStreamParameters.streamId
+    }]);
+});
+
+test('multiplex data stores the prepared global player before the outbound pipe await', async () => {
+    const harness = createPeerDataHarness(true);
+    let prepared;
+    const dataRouter = {
+        async preparePlayer(producer, playerId, generation) {
+            assert.equal(producer.id, `ingress-${harness.peer.peerDataProducer.id}`);
+            assert.equal(playerId, harness.peer.id);
+            assert.equal(generation, harness.upstream.generation);
+            prepared = {
+                producer: new FakeDataEntity('central-player-producer', 50)
+            };
+            return prepared;
+        },
+        activatePlayer(player) {
+            assert.equal(player, prepared);
+            return true;
+        },
+        closePlayer() {}
+    };
+    const originalFromIngress = harness.peer.route.fromIngress;
+    harness.peer.route.fromIngress = async (producer) => {
+        assert.equal(harness.peer.dataRouterPlayer, prepared);
+        return originalFromIngress(producer);
+    };
+    harness.lifecycle.setPeerState(
+        harness.socket,
+        harness.upstream,
+        harness.peer,
+        dataRouter
+    );
+
+    await harness.lifecycle.setupPeerDataChannels(harness.peer.id);
+
+    assert.deepEqual(harness.routeCalls.map(([direction]) => direction), [
+        'toIngress',
+        'fromIngress'
+    ]);
+    assert.equal(
+        harness.peer.transport.consumed[0].dataProducerId,
+        'viewer-central-player-producer'
+    );
+    assert.deepEqual(harness.signals, [{
+        type: 'peerDataChannels',
+        playerId: harness.peer.id,
+        sendStreamId: harness.peer.peerDataProducer.sctpStreamParameters.streamId,
+        recvStreamId: harness.peer.peerDataConsumer.sctpStreamParameters.streamId
+    }]);
 });

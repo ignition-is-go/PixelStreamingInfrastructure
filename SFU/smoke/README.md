@@ -1,9 +1,11 @@
 # Validate SFU reconnects in isolation
 
 This Linux smoke test runs the real signalling server and SFU with Chromium
-clients. The source is a generated canvas video with multiplexed data channels.
-It checks viewer-before-streamer startup, fresh video after reconnect, and a
-browser-to-streamer-to-browser payload round trip. It does not run Unreal Engine
+clients. The source is generated canvas video and oscillator audio with multiplexed
+data channels. It checks viewer-before-streamer startup, decoded audio, fresh video
+after reconnect, and a browser-to-streamer-to-browser payload round trip for two
+viewers. Four media workers are used by default, placing the viewers on different
+routers. Set `SFU_WORKER_COUNT=1` to verify the single-router path. It does not run Unreal Engine
 or verify application-specific controls, production TURN, or WAN connectivity.
 
 The wrapper creates a private network namespace containing loopback and one dummy
@@ -26,6 +28,6 @@ Run from a Linux environment that permits network namespace creation and has
 npx --yes --package=node@22.14.0 -c 'SFU/smoke/run-reconnect.sh'
 ```
 
-Success requires four `PASS` lines and exit code zero. No production credentials
+Success requires six `PASS` lines and exit code zero. No production credentials
 or endpoints are needed. This is a manual integration check, separate from the
 fast `SFU/tests/*.test.js` suite.
