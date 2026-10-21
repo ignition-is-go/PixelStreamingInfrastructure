@@ -18,6 +18,7 @@ Configuration is handled through the single config.js file.
 
 | Name | Type | Default | Description |
 |-|-|-|-|
+| workerCount | Number | 1 | Total media workers. Must be a positive integer. With one worker, ingress and viewers share a router. With more than one, the first worker receives the source and the remaining workers serve viewers. |
 | worker | Object | | Worker-related configuration options. See below. |
 | router | Object | | Router-related configuration options. See below. |
 | webRtcTransport | Object | | WebRTC transport-related configuration options. See below. |
@@ -47,6 +48,13 @@ Configuration is handled through the single config.js file.
 ## Running
 
 Several scripts are supplied for Windows and Linux in the [platform_scripts](platform_scripts/) folder. These are the easiest way to get the server running under common situations. They can also be used as a reference for new situations.
+
+`--workerCount=4` overrides `mediasoup.workerCount` in the bundled configuration.
+Viewers join the least-active viewer worker and remain there until disconnect.
+Workers share one encoded source through native mediasoup pipes. Audio and video
+are forwarded without decoding or re-encoding. Multiplexed controls retain one
+global player and held-input policy. A worker failure restarts the entire SFU,
+matching the single-worker behavior.
 
 ## Streaming from UE
 

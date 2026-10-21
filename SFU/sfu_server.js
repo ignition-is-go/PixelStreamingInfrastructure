@@ -4,6 +4,7 @@ const mediasoup = require('mediasoup');
 const mediasoupSdp = require('@epicgames-ps/mediasoup-sdp-bridge');
 const minimist = require('minimist');
 const { createDataRouter } = require('./data_router');
+const { createRouterFanout } = require('./router_fanout');
 const { runSafely } = require('./async_helpers');
 const { GenerationRegistry } = require('./generation_registry');
 const { SignallingWatchdog, reconnectDelayMs } = require('./signalling_watchdog');
@@ -36,7 +37,7 @@ let signallingWatchdog = null;
 let signallingReconnectTimer = null;
 let signallingReconnectAttempt = 0;
 let streamerDiscoveryTimer = null;
-let mediasoupRouter;
+let routerFanout;
 let streamer = null;
 const streamerGenerations = new GenerationRegistry();
 let peers = new Map();
@@ -200,6 +201,7 @@ async function onStreamerOffer(msg) {
         streamerDataProducer: null,
         streamerDataConsumer: null,
         dataRoute: null,
+        fanout: null,
         liveness: null
     });
     candidate.liveness = new StreamerLivenessMonitor({
@@ -213,17 +215,20 @@ async function onStreamerOffer(msg) {
     });
 
     try {
-        candidate.transport = await createWebRtcTransport(
-            "Streamer",
-            (iceState) => onStreamerICEStateChange(candidate, iceState),
-            (sctpState) => candidate.liveness.onSctpState(sctpState)
-        );
+        candidate.transport = await routerFanout.createIngressTransport({
+            identifier: 'Streamer',
+            onIceStateChange: (iceState) => onStreamerICEStateChange(candidate, iceState),
+            onSctpStateChange: (sctpState) => candidate.liveness.onSctpState(sctpState)
+        });
         if (streamerGenerations.pending !== candidate || candidate.cancelled) {
             candidate.transport.close();
             return;
         }
 
-        const sdpEndpoint = mediasoupSdp.createSdpEndpoint(candidate.transport, mediasoupRouter.rtpCapabilities);
+        const sdpEndpoint = mediasoupSdp.createSdpEndpoint(
+            candidate.transport,
+            routerFanout.ingressRtpCapabilities
+        );
         const offerResult = await sdpEndpoint.processOffer(msg.sdp, scalabilityMode);
         if (streamerGenerations.pending !== candidate || candidate.cancelled) {
             for (const producer of offerResult.producers) {
@@ -235,6 +240,10 @@ async function onStreamerOffer(msg) {
 
         candidate.producers = offerResult.producers;
         candidate.dataEnabled = offerResult.dataEnabled;
+        candidate.fanout = routerFanout.openGeneration({
+            generation: candidate.generation,
+            producers: candidate.producers
+        });
         if (!streamerGenerations.activate(candidate)) {
             throw new Error(`streamer generation ${candidate.generation} was superseded during setup`);
         }
@@ -253,6 +262,7 @@ async function onStreamerOffer(msg) {
             streamerGenerations.clearCurrent(candidate);
             streamer = null;
         }
+        candidate.fanout?.close();
         for (const producer of candidate.producers) {
             producer.close();
         }
@@ -275,6 +285,7 @@ function onStreamerDisconnected(notifySignalling = true) {
         const pending = streamerGenerations.cancelPending();
         pending.cancelled = true;
         pending.liveness?.stop();
+        pending.fanout?.close();
         for (const producer of pending.producers) {
             producer.close();
         }
@@ -291,6 +302,7 @@ function onStreamerDisconnected(notifySignalling = true) {
     if (disconnectedStreamer !== null) {
         disconnectedStreamer.liveness?.stop();
         dataRouter.closeStreamer(disconnectedStreamer.generation);
+        disconnectedStreamer.fanout?.close();
         for (const mediaProducer of disconnectedStreamer.producers) {
             mediaProducer.close();
         }
@@ -340,12 +352,16 @@ function closePeer(peer) {
         peer.peerDataConsumer,
         peer.peerDataProducer,
         peer.streamerDataConsumer,
-        peer.streamerDataProducer,
-        peer.transport
+        peer.streamerDataProducer
     ]) {
         if (entity && !entity.closed) {
             entity.close();
         }
+    }
+    if (peer.route) {
+        peer.route.close();
+    } else if (peer.transport && !peer.transport.closed) {
+        peer.transport.close();
     }
 }
 
@@ -374,27 +390,37 @@ async function onPeerConnected(peerId) {
         streamerDataProducer: null,
         streamerDataConsumer: null,
         dataRouterPlayer: null,
+        route: null,
         dataChannelsStarted: false,
         closed: false
     };
     peers.set(peerId, peer);
 
     try {
-        peer.transport = await createWebRtcTransport("Peer " + peerId);
-        if (!isCurrentPeer(peer, upstream)) {
+        const opened = await upstream.fanout.openPlayer({
+            playerId: peer.id,
+            isCurrent: () => isCurrentPeer(peer, upstream),
+            identifier: `Peer ${peer.id}`
+        });
+        if (opened.kind === 'stale') {
             closePeer(peer);
             return;
         }
-        peer.sdpEndpoint = mediasoupSdp.createSdpEndpoint(peer.transport, mediasoupRouter.rtpCapabilities);
+        peer.route = opened.route;
+        peer.transport = peer.route.transport;
+        peer.sdpEndpoint = mediasoupSdp.createSdpEndpoint(
+            peer.transport,
+            peer.route.rtpCapabilities
+        );
 
-        for (const mediaProducer of upstream.producers) {
+        for (const mediaProducer of peer.route.mediaProducers) {
             // mediasoup recommends creating server-side consumers paused until
             // the browser has applied the SDP answer. Starting immediately can
             // request the only useful keyframe before the remote receiver is
             // ready, producing a connected-but-black player until a later IDR.
             const consumer = await peer.transport.consume({
                 producerId: mediaProducer.id,
-                rtpCapabilities: mediasoupRouter.rtpCapabilities,
+                rtpCapabilities: peer.route.rtpCapabilities,
                 paused: true
             });
             if (!isCurrentPeer(peer, upstream)) {
@@ -471,15 +497,27 @@ async function setupPeerDataChannels(peerId) {
         return;
     }
 
+    const localForPeer = await peer.route.fromIngress(peer.streamerDataProducer);
+    if (localForPeer.kind === 'stale') {
+        closePeer(peer);
+        return;
+    }
+
     // peer data consumer (consumes streamer data)
-    peer.peerDataConsumer = await peer.transport.consumeData({ dataProducerId: peer.streamerDataProducer.id });
+    peer.peerDataConsumer = await peer.transport.consumeData({ dataProducerId: localForPeer.producer.id });
     if (!isCurrentPeer(peer, upstream)) {
         closePeer(peer);
         return;
     }
 
+    const localForStreamer = await peer.route.toIngress(peer.peerDataProducer);
+    if (localForStreamer.kind === 'stale') {
+        closePeer(peer);
+        return;
+    }
+
     // streamer data consumer (consumes peer data)
-    peer.streamerDataConsumer = await upstream.transport.consumeData({ dataProducerId: peer.peerDataProducer.id });
+    peer.streamerDataConsumer = await upstream.transport.consumeData({ dataProducerId: localForStreamer.producer.id });
     if (!isCurrentPeer(peer, upstream)) {
         closePeer(peer);
         return;
@@ -508,13 +546,29 @@ async function setupMultiplexPeerDataChannels(peer, upstream) {
         return;
     }
 
-    peer.dataRouterPlayer = await dataRouter.preparePlayer(peer.peerDataProducer, peer.id, upstream.generation);
+    const localForDataRouter = await peer.route.toIngress(peer.peerDataProducer);
+    if (localForDataRouter.kind === 'stale') {
+        closePeer(peer);
+        return;
+    }
+
+    peer.dataRouterPlayer = await dataRouter.preparePlayer(
+        localForDataRouter.producer,
+        peer.id,
+        upstream.generation
+    );
     if (!peer.dataRouterPlayer || !isCurrentPeer(peer, upstream)) {
         closePeer(peer);
         return;
     }
 
-    peer.peerDataConsumer = await peer.transport.consumeData({ dataProducerId: peer.dataRouterPlayer.producer.id });
+    const localForPeer = await peer.route.fromIngress(peer.dataRouterPlayer.producer);
+    if (localForPeer.kind === 'stale') {
+        closePeer(peer);
+        return;
+    }
+
+    peer.peerDataConsumer = await peer.transport.consumeData({ dataProducerId: localForPeer.producer.id });
     if (!isCurrentPeer(peer, upstream) || !dataRouter.activatePlayer(peer.dataRouterPlayer)) {
         closePeer(peer);
         return;
@@ -681,22 +735,17 @@ async function onSignallingMessage(message) {
 }
 
 async function startMediasoup() {
-    let worker = await mediasoup.createWorker({
-        logLevel: config.mediasoup.worker.logLevel,
-        logTags: config.mediasoup.worker.logTags,
-        rtcMinPort: config.mediasoup.worker.rtcMinPort,
-        rtcMaxPort: config.mediasoup.worker.rtcMaxPort,
+    return createRouterFanout({
+        mediasoup,
+        workerCount: config.mediasoup.workerCount,
+        workerOptions: config.mediasoup.worker,
+        routerOptions: config.mediasoup.router,
+        webRtcTransportOptions: config.mediasoup.webRtcTransport,
+        onWorkerDied: (workerIndex) => {
+            console.error(`mediasoup worker ${workerIndex} died (this should never happen)`);
+            process.exit(1);
+        }
     });
-
-    worker.on('died', () => {
-        console.error('mediasoup worker died (this should never happen)');
-        process.exit(1);
-    });
-
-    const mediaCodecs = config.mediasoup.router.mediaCodecs;
-    const mediasoupRouter = await worker.createRouter({ mediaCodecs });
-
-    return mediasoupRouter;
 }
 
 async function onStreamerICEStateChange(upstream, iceState) {
@@ -756,39 +805,6 @@ async function onStreamerICEStateChange(upstream, iceState) {
     }
 }
 
-async function createWebRtcTransport(identifier, iceStateHandler, sctpStateHandler) {
-    const {
-        listenIps,
-        listenInfos,
-        initialAvailableOutgoingBitrate
-    } = config.mediasoup.webRtcTransport;
-
-    const transport = await mediasoupRouter.createWebRtcTransport({
-        ...(listenInfos ? { listenInfos } : { listenIps }),
-        enableUdp: true,
-        enableTcp: false,
-        preferUdp: true,
-        enableSctp: true, // datachannels
-        initialAvailableOutgoingBitrate: initialAvailableOutgoingBitrate
-    });
-
-    transport.on("icestatechange", (iceState) => {
-        console.log("%s ICE state changed to %s", identifier, iceState);
-        if (iceStateHandler) {
-            void runSafely(`${identifier} ICE state handler failed`, () => iceStateHandler(iceState));
-        }
-    });
-    transport.on("iceselectedtuplechange", (iceTuple) => { console.log("%s ICE selected tuple %s", identifier, JSON.stringify(iceTuple)); });
-    transport.on("sctpstatechange", (sctpState) => {
-        console.log("%s SCTP state changed to %s", identifier, sctpState);
-        if (sctpStateHandler) {
-            void runSafely(`${identifier} SCTP state handler failed`, () => sctpStateHandler(sctpState));
-        }
-    });
-
-    return transport;
-}
-
 async function main() {
     var argv = minimist(process.argv.slice(2));
 
@@ -800,8 +816,8 @@ async function main() {
     console.log("Config = ");
     console.log(config);
 
-    mediasoupRouter = await startMediasoup();
-    dataRouter = await createDataRouter(mediasoupRouter);
+    routerFanout = await startMediasoup();
+    dataRouter = await createDataRouter(routerFanout.ingressRouter);
 
     connectSignalling(config.signallingURL);
 }

@@ -56,7 +56,12 @@ async function until(fn, description, timeout = 30000) {
         '--log_folder',
         path.join(output, 'signalling-logs')
     ]);
-    start('sfu', ['SFU/sfu_server.js', '--signallingURL=ws://127.0.0.1:18889', '--PublicIP=10.200.0.1']);
+    start('sfu', [
+        'SFU/sfu_server.js',
+        '--signallingURL=ws://127.0.0.1:18889',
+        '--PublicIP=10.200.0.1',
+        `--workerCount=${process.env.SFU_WORKER_COUNT ?? 4}`
+    ]);
     server = http.createServer((req, res) => {
         res.writeHead(200, { 'Content-Type': 'text/html' });
         res.end('<html><body>Isolated SFU smoke test</body></html>');
@@ -80,91 +85,98 @@ async function until(fn, description, timeout = 30000) {
             console.log('pageerror:', String(e));
         });
     });
-    const viewer = await context.newPage();
-    await viewer.goto('http://127.0.0.1:18081');
-    await delay(1500);
-    await viewer.evaluate(() => {
-        window.errors = [];
-        window.received = [];
-        window.offers = 0;
-        window.disconnections = 0;
-        const send = (m) => window.ws.send(JSON.stringify(m));
-        window.connectViewer = () => {
-            window.ws = new WebSocket('ws://127.0.0.1:18080');
-            ws.onclose = () => {
-                window.disconnections++;
-                window.subscribed = false;
-                window.pc?.close();
-                window.pc = null;
-                setTimeout(connectViewer, 300);
-            };
-            const setupChannel = (dc) => {
-                dc.binaryType = 'arraybuffer';
-                dc.onmessage = (e) => received.push(new TextDecoder().decode(e.data));
-            };
-            ws.onopen = () => send({ type: 'listStreamers' });
-            ws.onmessage = async (e) => {
-                try {
-                    const m = JSON.parse(e.data);
-                    if (m.type === 'ping') send({ type: 'pong', time: m.time });
-                    if (m.type !== 'streamerList') console.log('signal', m.type);
-                    if (m.type === 'streamerList' && m.ids.includes('SFU') && !window.subscribed) {
-                        window.subscribed = true;
-                        send({ type: 'subscribe', streamerId: 'SFU' });
-                    }
-                    if (m.type === 'streamerDisconnected') {
-                        window.subscribed = false;
-                        window.disconnections++;
-                        window.pc?.close();
-                        window.pc = null;
-                    }
-                    if (m.type === 'offer') {
-                        for (const old of document.querySelectorAll('video')) old.remove();
-                        window.pc?.close();
-                        window.pc = new RTCPeerConnection({ iceServers: [] });
-                        window.offers++;
-                        pc.ontrack = (e) => {
-                            window.video = document.createElement('video');
-                            video.autoplay = true;
-                            video.muted = true;
-                            video.srcObject = new MediaStream([e.track]);
-                            document.body.append(video);
-                            video.play();
-                        };
-                        await pc.setRemoteDescription({ type: 'offer', sdp: m.sdp });
-                        await pc.setLocalDescription(await pc.createAnswer());
-                        send({ type: 'answer', sdp: pc.localDescription.sdp });
-                        send({ type: 'dataChannelRequest' });
-                    }
-                    if (m.type === 'peerDataChannels') {
-                        window.tx = pc.createDataChannel('send', { negotiated: true, id: m.sendStreamId });
-                        setupChannel(tx);
-                        if (m.recvStreamId !== m.sendStreamId) {
-                            window.rx = pc.createDataChannel('recv', {
-                                negotiated: true,
-                                id: m.recvStreamId
-                            });
-                            setupChannel(rx);
-                        }
-                        send({ type: 'peerDataChannelsReady' });
-                    }
-                } catch (e) {
-                    errors.push(String(e));
-                    console.log('client error', String(e));
-                }
-            };
-        };
-        connectViewer();
-        window.poll = setInterval(() => {
-            if (ws.readyState === 1) {
-                if (!window.pc && window.subscribed) {
-                    send({ type: 'unsubscribe' });
+    async function createViewer() {
+        const viewer = await context.newPage();
+        await viewer.goto('http://127.0.0.1:18081');
+        await delay(1500);
+        await viewer.evaluate(() => {
+            window.errors = [];
+            window.received = [];
+            window.offers = 0;
+            window.disconnections = 0;
+            const send = (m) => window.ws.send(JSON.stringify(m));
+            window.connectViewer = () => {
+                window.ws = new WebSocket('ws://127.0.0.1:18080');
+                ws.onclose = () => {
+                    window.disconnections++;
                     window.subscribed = false;
+                    window.pc?.close();
+                    window.pc = null;
+                    setTimeout(connectViewer, 300);
+                };
+                const setupChannel = (dc) => {
+                    dc.binaryType = 'arraybuffer';
+                    dc.onmessage = (e) => received.push(new TextDecoder().decode(e.data));
+                };
+                ws.onopen = () => send({ type: 'listStreamers' });
+                ws.onmessage = async (e) => {
+                    try {
+                        const m = JSON.parse(e.data);
+                        if (m.type === 'ping') send({ type: 'pong', time: m.time });
+                        if (m.type !== 'streamerList') console.log('signal', m.type);
+                        if (m.type === 'streamerList' && m.ids.includes('SFU') && !window.subscribed) {
+                            window.subscribed = true;
+                            send({ type: 'subscribe', streamerId: 'SFU' });
+                        }
+                        if (m.type === 'streamerDisconnected') {
+                            window.subscribed = false;
+                            window.disconnections++;
+                            window.pc?.close();
+                            window.pc = null;
+                        }
+                        if (m.type === 'offer') {
+                            for (const old of document.querySelectorAll('video')) old.remove();
+                            window.pc?.close();
+                            window.pc = new RTCPeerConnection({ iceServers: [] });
+                            window.offers++;
+                            pc.ontrack = (e) => {
+                                window.video = document.createElement('video');
+                                video.autoplay = true;
+                                video.muted = true;
+                                video.srcObject = new MediaStream([e.track]);
+                                document.body.append(video);
+                                video.play();
+                            };
+                            await pc.setRemoteDescription({ type: 'offer', sdp: m.sdp });
+                            await pc.setLocalDescription(await pc.createAnswer());
+                            send({ type: 'answer', sdp: pc.localDescription.sdp });
+                            send({ type: 'dataChannelRequest' });
+                        }
+                        if (m.type === 'peerDataChannels') {
+                            window.tx = pc.createDataChannel('send', {
+                                negotiated: true,
+                                id: m.sendStreamId
+                            });
+                            setupChannel(tx);
+                            if (m.recvStreamId !== m.sendStreamId) {
+                                window.rx = pc.createDataChannel('recv', {
+                                    negotiated: true,
+                                    id: m.recvStreamId
+                                });
+                                setupChannel(rx);
+                            }
+                            send({ type: 'peerDataChannelsReady' });
+                        }
+                    } catch (e) {
+                        errors.push(String(e));
+                        console.log('client error', String(e));
+                    }
+                };
+            };
+            connectViewer();
+            window.poll = setInterval(() => {
+                if (ws.readyState === 1) {
+                    if (!window.pc && window.subscribed) {
+                        send({ type: 'unsubscribe' });
+                        window.subscribed = false;
+                    }
+                    send({ type: 'listStreamers' });
                 }
-                send({ type: 'listStreamers' });
-            }
-        }, 500);
-    });
+            }, 500);
+        });
+        return viewer;
+    }
+    const viewer = await createViewer();
     await delay(1000);
     assert.equal(await viewer.evaluate(() => offers), 0);
     console.log('PASS: viewer connected before streamer, no premature offer');
@@ -188,6 +200,12 @@ async function until(fn, description, timeout = 30000) {
             ctx.fillText(String(tick), 20, 30);
         }, 33);
         window.stream = canvas.captureStream(30);
+        window.audioContext = new AudioContext();
+        const destination = audioContext.createMediaStreamDestination();
+        const oscillator = audioContext.createOscillator();
+        oscillator.connect(destination);
+        oscillator.start();
+        stream.addTrack(destination.stream.getAudioTracks()[0]);
         window.start = () => {
             window.ws = new WebSocket('ws://127.0.0.1:18888');
             const send = (m) => ws.send(JSON.stringify(m));
@@ -201,10 +219,11 @@ async function until(fn, description, timeout = 30000) {
                     if (m.type === 'playerConnected') {
                         window.pc?.close();
                         window.pc = new RTCPeerConnection({ iceServers: [] });
-                        pc.addTransceiver(stream.getVideoTracks()[0], {
-                            direction: 'sendonly',
-                            streams: [stream]
-                        });
+                        for (const track of stream.getTracks())
+                            pc.addTransceiver(track, {
+                                direction: 'sendonly',
+                                streams: [stream]
+                            });
                         const tx = pc.createDataChannel('send', { negotiated: true, id: 0 });
                         const rx = pc.createDataChannel('recv', { negotiated: true, id: 1 });
                         window.channels = [tx, rx];
@@ -238,11 +257,11 @@ async function until(fn, description, timeout = 30000) {
         };
         start();
     });
-    async function verify(label) {
-        await until(() => viewer.evaluate(() => window.tx?.readyState === 'open'), label + ' data channel');
+    async function verify(label, player = viewer) {
+        await until(() => player.evaluate(() => window.tx?.readyState === 'open'), label + ' data channel');
         await until(
             () =>
-                viewer.evaluate(() =>
+                player.evaluate(() =>
                     [...document.querySelectorAll('video')].some(
                         (v) => v.getVideoPlaybackQuality().totalVideoFrames > 5
                     )
@@ -252,7 +271,7 @@ async function until(fn, description, timeout = 30000) {
             console.log(
                 'viewer stats',
                 JSON.stringify(
-                    await viewer.evaluate(async () => ({
+                    await player.evaluate(async () => ({
                         videos: [...document.querySelectorAll('video')].map((v) => ({
                             frames: v.getVideoPlaybackQuality().totalVideoFrames,
                             ready: v.readyState
@@ -269,18 +288,31 @@ async function until(fn, description, timeout = 30000) {
             );
             throw e;
         });
-        await viewer.evaluate((label) => tx.send(new TextEncoder().encode(label)), label);
+        await until(
+            () =>
+                player.evaluate(async () =>
+                    [...(await pc.getStats()).values()].some(
+                        (stat) =>
+                            stat.type === 'inbound-rtp' &&
+                            stat.kind === 'audio' &&
+                            stat.bytesReceived > 0 &&
+                            stat.totalSamplesReceived > 0
+                    )
+                ),
+            label + ' decoded audio'
+        );
+        await player.evaluate((label) => tx.send(new TextEncoder().encode(label)), label);
         await until(
             () => streamer.evaluate((label) => received.includes(label), label),
             label + ' upstream data'
         );
         await until(
-            () => viewer.evaluate((label) => received.includes(label), label),
+            () => player.evaluate((label) => received.includes(label), label),
             label + ' downstream data'
         );
         console.log(
-            'PASS: ' + label + ' video and bidirectional multiplexed data',
-            await viewer.evaluate(() =>
+            'PASS: ' + label + ' video, decoded audio and bidirectional multiplexed data',
+            await player.evaluate(() =>
                 [...document.querySelectorAll('video')].map(
                     (v) => v.getVideoPlaybackQuality().totalVideoFrames
                 )
@@ -288,6 +320,8 @@ async function until(fn, description, timeout = 30000) {
         );
     }
     await verify('initial');
+    const secondViewer = await createViewer();
+    await verify('second viewer', secondViewer);
     const offers = await viewer.evaluate(() => window.offers);
     await streamer.evaluate(() => {
         ws.close();
@@ -297,8 +331,10 @@ async function until(fn, description, timeout = 30000) {
     await streamer.evaluate(() => start());
     await until(() => viewer.evaluate((n) => offers > n, offers), 'replacement offer');
     await verify('reconnected');
+    await verify('second viewer reconnected', secondViewer);
     assert.deepEqual(pageErrors, []);
     assert.deepEqual(await viewer.evaluate(() => errors), []);
+    assert.deepEqual(await secondViewer.evaluate(() => errors), []);
     assert.deepEqual(await streamer.evaluate(() => errors), []);
     assert.doesNotMatch(
         fs.readFileSync(path.join(output, 'sfu.log'), 'utf8'),

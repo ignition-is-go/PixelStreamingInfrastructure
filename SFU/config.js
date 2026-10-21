@@ -1,11 +1,22 @@
 // Parse passed arguments
 let passedPublicIP = null;
+let passedWorkerCount = null;
 for(let arg of process.argv){
   if(arg && arg.startsWith("--PublicIP=")){
     let splitArr = arg.split("=");
     if(splitArr.length === 2){
       passedPublicIP = splitArr[1];
       console.log("--PublicIP=" + passedPublicIP);
+    }
+  }
+  if(arg && arg.startsWith("--workerCount=")){
+    let splitArr = arg.split("=");
+    if(splitArr.length === 2){
+      passedWorkerCount = Number(splitArr[1]);
+      if(!Number.isInteger(passedWorkerCount) || passedWorkerCount < 1){
+        throw new TypeError("--workerCount must be a positive integer");
+      }
+      console.log("--workerCount=" + passedWorkerCount);
     }
   }
 }
@@ -37,6 +48,7 @@ const config = {
   enableSVC: true,
 
   mediasoup: {
+    workerCount: passedWorkerCount ?? 1,
     worker: {
       rtcMinPort: 40000,
       rtcMaxPort: 49999,
