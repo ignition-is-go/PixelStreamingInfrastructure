@@ -32,7 +32,7 @@ function webRtcTransportOptions(options) {
 
 async function createRouterFanout({
     mediasoup,
-    workerCount,
+    workerCount = 1,
     workerOptions,
     routerOptions,
     webRtcTransportOptions: transportOptions,

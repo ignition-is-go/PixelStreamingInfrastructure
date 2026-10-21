@@ -356,6 +356,13 @@ test('worker death reports its slot and fanout close closes every worker', async
     assert.equal(workers.every(({ closed }) => closed), true);
 });
 
+test('omitted worker count keeps external configs on one worker', async () => {
+    const { fanout, workers } = await createHarness(undefined);
+
+    assert.equal(workers.length, 1);
+    fanout.close();
+});
+
 test('invalid worker counts fail at the configuration boundary', async () => {
     for (const workerCount of [0, -1, 1.5, '4']) {
         await assert.rejects(
