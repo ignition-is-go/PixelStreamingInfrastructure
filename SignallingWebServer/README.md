@@ -139,6 +139,12 @@ for each player, streamer, or SFU connection:
 }
 ```
 
+The optional `streamerUrls` array overrides `urls` for streamer connections only.
+Players and SFUs still receive `urls`. Omit `streamerUrls` to keep the same relay
+list for every connection. When present, the array must contain at least one TURN
+URL. Both lists use the same secret, credential lifetime, and STUN configuration.
+The server does not filter either list by hostname, port, or transport.
+
 `secretFile` resolves relative to the JSON file. Its contents must match coturn's
 `static-auth-secret` with `use-auth-secret` enabled. Keep both files outside the
 HTTP root, mount them read-only, and restrict the secret to the server user.

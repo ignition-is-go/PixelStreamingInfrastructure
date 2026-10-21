@@ -20,7 +20,7 @@ import playerByIdHandler from './paths/players/{playerId}';
 import statusHandler from './paths/status';
 import streamersHandler from './paths/streamers';
 import streamerByIdHandler from './paths/streamers/{streamerId}';
-import { loadTurnPeerOptionsProvider } from './TurnCredentials';
+import { loadTurnPeerOptionsProviders } from './TurnCredentials';
 
 // eslint-disable-next-line  @typescript-eslint/no-unsafe-assignment
 const pjson = require('../package.json');
@@ -286,7 +286,9 @@ const serverOpts: IServerConfig = {
 };
 
 if (process.env.TURN_CONFIG_FILE) {
-    serverOpts.peerOptionsProvider = loadTurnPeerOptionsProvider(process.env.TURN_CONFIG_FILE);
+    const peerOptionsProviders = loadTurnPeerOptionsProviders(process.env.TURN_CONFIG_FILE);
+    serverOpts.peerOptionsProvider = peerOptionsProviders.peerOptionsProvider;
+    serverOpts.streamerPeerOptionsProvider = peerOptionsProviders.streamerPeerOptionsProvider;
     serverOpts.peerOptions = {};
 }
 

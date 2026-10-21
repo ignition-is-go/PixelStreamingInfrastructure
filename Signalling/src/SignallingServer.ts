@@ -42,6 +42,10 @@ export interface IServerConfig {
     // Generate options at connection time, for example for expiring TURN credentials.
     peerOptionsProvider?: () => object;
 
+    // Generate options specifically for streamer connections. Falls back to
+    // peerOptionsProvider when omitted.
+    streamerPeerOptionsProvider?: () => object;
+
     // Additional websocket options for the streamer listening websocket.
     streamerWsOptions?: wslib.ServerOptions;
 
@@ -147,13 +151,16 @@ export class SignallingServer {
         }
     }
 
-    private sendConfigMessage(connection: { sendMessage(msg: Messages.config): void }): void {
+    private sendConfigMessage(
+        connection: { sendMessage(msg: Messages.config): void },
+        peerOptionsProvider = this.config.peerOptionsProvider
+    ): void {
         // peer connection options is a general field with all optional fields;
         // it doesnt play nice with mergePartial so we just add it verbatim
         const message: Messages.config = MessageHelpers.createMessage(Messages.config, this.protocolConfig);
         // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-        message.peerConnectionOptions = this.config.peerOptionsProvider
-            ? this.config.peerOptionsProvider()
+        message.peerConnectionOptions = peerOptionsProvider
+            ? peerOptionsProvider()
             : this.protocolConfig['peerConnectionOptions'];
         connection.sendMessage(message);
     }
@@ -175,7 +182,7 @@ export class SignallingServer {
             );
         });
 
-        this.sendConfigMessage(newStreamer);
+        this.sendConfigMessage(newStreamer, this.config.streamerPeerOptionsProvider);
     }
 
     private onPlayerConnected(ws: wslib.WebSocket, request: http.IncomingMessage) {

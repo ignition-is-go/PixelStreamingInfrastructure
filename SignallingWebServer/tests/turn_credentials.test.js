@@ -8,7 +8,7 @@ const { spawn } = require('node:child_process');
 const { once } = require('node:events');
 const net = require('node:net');
 const WebSocket = require('ws');
-const { loadTurnPeerOptionsProvider } = require('../dist/TurnCredentials');
+const { loadTurnPeerOptionsProviders } = require('../dist/TurnCredentials');
 
 function fixture(t, overrides = {}) {
     const dir = mkdtempSync(join(tmpdir(), 'turn-issuer-'));
@@ -29,7 +29,8 @@ function fixture(t, overrides = {}) {
 
 test('each config gets unique valid HMAC credentials and expiry follows issuance time', (t) => {
     const f = fixture(t);
-    const issue = loadTurnPeerOptionsProvider(f.path);
+    const { peerOptionsProvider: issue, streamerPeerOptionsProvider: issueStreamer } =
+        loadTurnPeerOptionsProviders(f.path);
     t.mock.method(Date, 'now', () => 1000000);
     const first = issue();
     const second = issue();
@@ -44,6 +45,19 @@ test('each config gets unique valid HMAC credentials and expiry follows issuance
     assert.ok(Number(a.username.split(':')[0]) < Date.now() / 1000);
     assert.ok(!JSON.stringify(first).includes(f.secret));
     assert.equal(first.iceTransportPolicy, undefined);
+    const firstStreamer = issueStreamer();
+    const secondStreamer = issueStreamer();
+    assert.deepEqual(firstStreamer.iceServers[0].urls, f.config.stunUrls);
+    assert.deepEqual(firstStreamer.iceServers[1].urls, f.config.urls);
+    assert.notEqual(firstStreamer.iceServers[1].username, secondStreamer.iceServers[1].username);
+});
+
+test('streamer URL override leaves default provider unchanged', (t) => {
+    const streamerUrls = ['turn:127.0.0.2:3478?transport=udp'];
+    const f = fixture(t, { streamerUrls });
+    const { peerOptionsProvider, streamerPeerOptionsProvider } = loadTurnPeerOptionsProviders(f.path);
+    assert.deepEqual(peerOptionsProvider().iceServers[1].urls, f.config.urls);
+    assert.deepEqual(streamerPeerOptionsProvider().iceServers[1].urls, streamerUrls);
 });
 
 for (const [name, override] of Object.entries({
@@ -54,18 +68,23 @@ for (const [name, override] of Object.entries({
     ttlTooLong: { ttlSeconds: 604801 },
     ttlFraction: { ttlSeconds: 1.5 },
     missingSecret: { secretFile: 'missing' },
-    mixedStun: { stunUrls: ['turn:localhost:3478'] }
+    mixedStun: { stunUrls: ['turn:localhost:3478'] },
+    emptyStreamerUrls: { streamerUrls: [] },
+    nullStreamerUrls: { streamerUrls: null },
+    stringStreamerUrls: { streamerUrls: 'turn:localhost:3478' },
+    nonTurnStreamerUrl: { streamerUrls: ['https://example.com'] },
+    credentialsInStreamerUrl: { streamerUrls: ['turn:user:password@localhost'] }
 })) {
     test(`invalid config fails before listening: ${name}`, (t) => {
         const f = fixture(t, override);
-        assert.throws(() => loadTurnPeerOptionsProvider(f.path));
+        assert.throws(() => loadTurnPeerOptionsProviders(f.path));
     });
 }
 
 test('empty secret fails closed', (t) => {
     const f = fixture(t);
     writeFileSync(join(f.dir, 'secret'), '\n');
-    assert.throws(() => loadTurnPeerOptionsProvider(f.path), /empty/);
+    assert.throws(() => loadTurnPeerOptionsProviders(f.path), /empty/);
 });
 
 async function freePort() {
@@ -95,83 +114,113 @@ async function readConfig(url) {
     }
 }
 
+async function startSignaller(t, fixture, { restApi = false } = {}) {
+    const player = await freePort(),
+        streamer = await freePort(),
+        sfu = await freePort();
+    const args = [
+        'dist/index.js',
+        '--no_config',
+        '--player_port',
+        String(player),
+        '--streamer_port',
+        String(streamer),
+        '--sfu_port',
+        String(sfu),
+        '--log_folder',
+        fixture.dir,
+        '--log_level_console',
+        'debug',
+        '--log_level_file',
+        'debug',
+        '--console_messages',
+        'verbose'
+    ];
+    if (restApi) args.push('--rest_api');
+    const proc = spawn(process.execPath, args, {
+        cwd: resolve(__dirname, '..'),
+        env: { ...process.env, TURN_CONFIG_FILE: fixture.path },
+        stdio: ['ignore', 'pipe', 'pipe']
+    });
+    let output = '';
+    proc.stdout.on('data', (data) => (output += data));
+    proc.stderr.on('data', (data) => (output += data));
+    t.after(async () => {
+        if (proc.exitCode === null) {
+            proc.kill();
+            await once(proc, 'exit');
+        }
+    });
+    let firstPlayer;
+    for (let i = 0; i < 80; i++) {
+        assert.equal(proc.exitCode, null, output);
+        try {
+            firstPlayer = await readConfig(`ws://127.0.0.1:${player}`);
+            break;
+        } catch {
+            await new Promise((resolve) => setTimeout(resolve, 50));
+        }
+    }
+    assert.ok(firstPlayer, output);
+    return { player, streamer, sfu, firstPlayer, output: () => output };
+}
+
+test('real streamer wire falls back to default provider when override is absent', async (t) => {
+    const urls = [
+        'turn:127.0.0.1:3478?transport=udp',
+        'turns:relay.example.com:443?transport=tcp'
+    ];
+    const f = fixture(t, { urls });
+    const server = await startSignaller(t, f);
+    const upstream = await readConfig(`ws://127.0.0.1:${server.streamer}`);
+    assert.deepEqual(upstream.iceServers[0].urls, f.config.stunUrls);
+    assert.deepEqual(upstream.iceServers[1].urls, urls);
+});
+
 test(
     'real signaller issues fresh configs and keeps credentials out of debug logs and REST config',
     { timeout: 15000 },
     async (t) => {
-        const f = fixture(t);
-        const player = await freePort(),
-            streamer = await freePort(),
-            sfu = await freePort();
-        const proc = spawn(
-            process.execPath,
-            [
-                'dist/index.js',
-                '--no_config',
-                '--player_port',
-                String(player),
-                '--streamer_port',
-                String(streamer),
-                '--sfu_port',
-                String(sfu),
-                '--rest_api',
-                '--log_folder',
-                f.dir,
-                '--log_level_console',
-                'debug',
-                '--log_level_file',
-                'debug',
-                '--console_messages',
-                'verbose'
-            ],
-            {
-                cwd: resolve(__dirname, '..'),
-                env: { ...process.env, TURN_CONFIG_FILE: f.path },
-                stdio: ['ignore', 'pipe', 'pipe']
-            }
-        );
-        let output = '';
-        proc.stdout.on('data', (data) => (output += data));
-        proc.stderr.on('data', (data) => (output += data));
-        t.after(async () => {
-            if (proc.exitCode === null) {
-                proc.kill();
-                await once(proc, 'exit');
-            }
-        });
-        let first;
-        for (let i = 0; i < 80; i++) {
-            assert.equal(proc.exitCode, null, output);
-            try {
-                first = await readConfig(`ws://127.0.0.1:${player}`);
-                break;
-            } catch {
-                await new Promise((r) => setTimeout(r, 50));
-            }
-        }
-        assert.ok(first, output);
-        const second = await readConfig(`ws://127.0.0.1:${player}`);
-        const upstream = await readConfig(`ws://127.0.0.1:${streamer}`);
+        const urls = [
+            'turn:127.0.0.1:3478?transport=udp',
+            'turns:relay.example.com:443?transport=tcp'
+        ];
+        const streamerUrls = ['turn:127.0.0.2:3478?transport=tcp'];
+        const f = fixture(t, { urls, streamerUrls });
+        const server = await startSignaller(t, f, { restApi: true });
+        const first = server.firstPlayer;
+        const second = await readConfig(`ws://127.0.0.1:${server.player}`);
+        const upstream = await readConfig(`ws://127.0.0.1:${server.streamer}`);
+        const sfuPeer = await readConfig(`ws://127.0.0.1:${server.sfu}`);
         assert.notEqual(first.iceServers[1].username, second.iceServers[1].username);
-        for (const options of [first, second, upstream]) {
+        for (const options of [first, second, sfuPeer]) {
             const relay = options.iceServers[1];
-            assert.deepEqual(relay.urls, f.config.urls);
+            assert.deepEqual(relay.urls, urls);
+            assert.deepEqual(options.iceServers[0].urls, f.config.stunUrls);
             assert.equal(
                 relay.credential,
                 createHmac('sha1', f.secret).update(relay.username).digest('base64')
             );
         }
-        const response = await fetch(`http://127.0.0.1:${player}/api/config`);
+        assert.deepEqual(upstream.iceServers[1].urls, streamerUrls);
+        assert.deepEqual(upstream.iceServers[0].urls, f.config.stunUrls);
+        assert.equal(
+            upstream.iceServers[1].credential,
+            createHmac('sha1', f.secret).update(upstream.iceServers[1].username).digest('base64')
+        );
+        const response = await fetch(`http://127.0.0.1:${server.player}/api/config`);
         assert.equal(response.status, 200);
         const api = await response.text();
-        await new Promise((r) => setTimeout(r, 100));
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        let output = server.output();
         for (const name of readdirSync(f.dir).filter((n) => n.endsWith('.log')))
             output += readFileSync(join(f.dir, name), 'utf8');
         for (const value of [
             f.secret,
             first.iceServers[1].credential,
             second.iceServers[1].credential,
-            upstream.iceServers[1].credential
+            upstream.iceServers[1].credential,
+            sfuPeer.iceServers[1].credential
         ]) {
             assert.ok(!output.includes(value), 'credentials must not appear in debug/verbose logs');
             assert.ok(!api.includes(value), 'credentials must not appear in REST config');
