@@ -256,6 +256,8 @@ async function onStreamerOffer(msg) {
             onStreamerDisconnected(false);
         }
     } catch (error) {
+        const failedCurrentAttempt = streamerGenerations.pending === candidate ||
+            streamerGenerations.isCurrent(candidate);
         if (streamerGenerations.pending === candidate) {
             streamerGenerations.cancelPending();
         }
@@ -270,6 +272,9 @@ async function onStreamerOffer(msg) {
         }
         if (candidate.transport && !candidate.transport.closed) {
             candidate.transport.close();
+        }
+        if (failedCurrentAttempt) {
+            sendSignalling({ type: 'unsubscribe' });
         }
         scheduleStreamerDiscovery();
         throw error;

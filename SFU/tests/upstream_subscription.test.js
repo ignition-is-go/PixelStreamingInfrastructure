@@ -42,18 +42,19 @@ module.exports = {
         console: { error() {}, log() {}, warn() {} },
         module,
         require: name => name === '@epicgames-ps/mediasoup-sdp-bridge' && bridge ? bridge : serverRequire(name),
-        setTimeout() { return {}; }
+        setTimeout() { return {}; },
+        clearTimeout() {}
     });
 
     vm.runInContext(source, context, { filename: serverPath });
     return module.exports;
 }
 
-function createEarlyViewerHarness() {
+function createEarlyViewerHarness(processOffer = async () => ({ producers: [], dataEnabled: false })) {
     const lifecycle = loadSfuLifecycle({
         createSdpEndpoint() {
             return {
-                async processOffer() { return { producers: [], dataEnabled: false }; },
+                processOffer,
                 createAnswer() { return 'upstream-answer'; },
                 createOffer() { return 'viewer-offer'; }
             };
@@ -175,6 +176,55 @@ class FakeSignaller {
         }
     }
 }
+
+test('rejected upstream offer unsubscribes before retry and preserves the waiting viewer', async () => {
+    let attempts = 0;
+    const { lifecycle, signals } = createEarlyViewerHarness(async () => {
+        if (++attempts === 1) throw new Error('empty codecs');
+        return { producers: [], dataEnabled: false };
+    });
+    const signaller = new FakeSignaller();
+    const send = signaller.send.bind(signaller);
+    signaller.send = message => {
+        signals.push(JSON.parse(message));
+        send(message);
+    };
+    lifecycle.setState(signaller, null, { closeStreamer() {} });
+    await lifecycle.onPeerConnected('waiting-after-rejection');
+    await lifecycle.onStreamerList({ ids: ['DefaultStreamer'] });
+    await assert.rejects(lifecycle.onStreamerOffer({ sdp: 'rejected-offer' }), /empty codecs/);
+    await lifecycle.onStreamerList({ ids: ['DefaultStreamer'] });
+    assert.deepEqual(signaller.trace, [
+        'subscribe', 'playerConnected', 'unsubscribe', 'playerDisconnected',
+        'subscribe', 'playerConnected'
+    ]);
+    await lifecycle.onStreamerOffer({ sdp: 'working-offer' });
+    await lifecycle.completeUpstream();
+    assert(signals.some(signal => signal.type === 'offer' && signal.playerId === 'waiting-after-rejection'));
+});
+
+test('late rejection from an old offer does not unsubscribe the replacement upstream', async () => {
+    let rejectFirst;
+    let firstStarted;
+    const started = new Promise(resolve => { firstStarted = resolve; });
+    let attempts = 0;
+    const { lifecycle, signals } = createEarlyViewerHarness(() => {
+        if (++attempts === 1) {
+            firstStarted();
+            return new Promise((resolve, reject) => { rejectFirst = reject; });
+        }
+        return Promise.resolve({ producers: [], dataEnabled: false });
+    });
+    const first = lifecycle.onStreamerOffer({ sdp: 'old-offer' });
+    await started;
+    lifecycle.onStreamerDisconnected();
+    await lifecycle.onStreamerOffer({ sdp: 'replacement-offer' });
+    await lifecycle.completeUpstream();
+    const unsubscribeCount = signals.filter(signal => signal.type === 'unsubscribe').length;
+    rejectFirst(new Error('old offer rejected'));
+    await assert.rejects(first, /old offer rejected/);
+    assert.equal(signals.filter(signal => signal.type === 'unsubscribe').length, unsubscribeCount);
+});
 
 test('upstream discovery resubscribes on the same signalling socket after ICE loss', async () => {
     const lifecycle = loadSfuLifecycle();
