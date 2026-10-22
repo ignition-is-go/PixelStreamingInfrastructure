@@ -41,6 +41,7 @@ let routerFanout;
 let streamer = null;
 const streamerGenerations = new GenerationRegistry();
 let peers = new Map();
+const waitingPeers = new Set();
 let dataRouter;
 let scalabilityMode = "L1T1"; // Scalability mode defaults to L1T1 and is set by the offer from the streamer
 
@@ -198,6 +199,7 @@ async function onStreamerOffer(msg) {
         dataEnabled: false,
         multiplexChannels: msg.multiplex,
         dataChannelsStarted: false,
+        readyForPeers: false,
         streamerDataProducer: null,
         streamerDataConsumer: null,
         dataRoute: null,
@@ -254,6 +256,8 @@ async function onStreamerOffer(msg) {
             onStreamerDisconnected(false);
         }
     } catch (error) {
+        const failedCurrentAttempt = streamerGenerations.pending === candidate ||
+            streamerGenerations.isCurrent(candidate);
         if (streamerGenerations.pending === candidate) {
             streamerGenerations.cancelPending();
         }
@@ -269,6 +273,9 @@ async function onStreamerOffer(msg) {
         if (candidate.transport && !candidate.transport.closed) {
             candidate.transport.close();
         }
+        if (failedCurrentAttempt) {
+            sendSignalling({ type: 'unsubscribe' });
+        }
         scheduleStreamerDiscovery();
         throw error;
     }
@@ -276,6 +283,10 @@ async function onStreamerOffer(msg) {
 
 function onStreamerDisconnected(notifySignalling = true) {
     console.log("Streamer disconnected");
+
+    if (!notifySignalling) {
+        waitingPeers.clear();
+    }
 
     if (notifySignalling) {
         sendSignalling({ type: 'unsubscribe' });
@@ -369,10 +380,13 @@ async function onPeerConnected(peerId) {
     console.log("Player %s joined", peerId);
 
     const upstream = streamer;
-    if (upstream === null) {
-        console.log("No streamer connected, ignoring player.");
+    if (upstream === null || !upstream.readyForPeers) {
+        console.log("Waiting for upstream before connecting player %s", peerId);
+        waitingPeers.add(peerId);
         return;
     }
+
+    waitingPeers.delete(peerId);
 
     const existingPeer = peers.get(peerId);
     if (existingPeer) {
@@ -657,6 +671,7 @@ async function onPeerAnswer(peerId, sdp) {
 
 function onPeerDisconnected(peerId) {
     console.log("Player %s disconnected", peerId);
+    waitingPeers.delete(peerId);
     const peer = peers.get(peerId);
     if (peer) {
         closePeer(peer);
@@ -794,8 +809,21 @@ async function onStreamerICEStateChange(upstream, iceState) {
                 upstream.streamerDataConsumer.sctpStreamParameters.streamId
             );
         }
-        if (streamer === upstream && !sendSignalling({ type: 'startStreaming' })) {
-            onStreamerDisconnected(false);
+        if (streamer === upstream) {
+            if (!sendSignalling({ type: 'startStreaming' })) {
+                onStreamerDisconnected(false);
+                return;
+            }
+            upstream.readyForPeers = true;
+            const readyPeers = [...waitingPeers];
+            await Promise.all(readyPeers.map(peerId => runSafely(
+                `Failed to connect waiting player ${peerId}`,
+                () => {
+                    if (waitingPeers.delete(peerId)) {
+                        return onPeerConnected(peerId);
+                    }
+                }
+            )));
         }
     } catch (error) {
         if (streamer === upstream) {
