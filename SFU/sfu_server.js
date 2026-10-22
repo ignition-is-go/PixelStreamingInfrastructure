@@ -199,6 +199,7 @@ async function onStreamerOffer(msg) {
         dataEnabled: false,
         multiplexChannels: msg.multiplex,
         dataChannelsStarted: false,
+        readyForPeers: false,
         streamerDataProducer: null,
         streamerDataConsumer: null,
         dataRoute: null,
@@ -253,16 +254,6 @@ async function onStreamerOffer(msg) {
         console.log("Sending answer to streamer.");
         if (!sendSignalling({ type: "answer", sdp: sdpEndpoint.createAnswer() })) {
             onStreamerDisconnected(false);
-        } else {
-            const readyPeers = [...waitingPeers];
-            await Promise.all(readyPeers.map(peerId => runSafely(
-                `Failed to connect waiting player ${peerId}`,
-                () => {
-                    if (waitingPeers.delete(peerId)) {
-                        return onPeerConnected(peerId);
-                    }
-                }
-            )));
         }
     } catch (error) {
         if (streamerGenerations.pending === candidate) {
@@ -384,7 +375,7 @@ async function onPeerConnected(peerId) {
     console.log("Player %s joined", peerId);
 
     const upstream = streamer;
-    if (upstream === null) {
+    if (upstream === null || !upstream.readyForPeers) {
         console.log("Waiting for upstream before connecting player %s", peerId);
         waitingPeers.add(peerId);
         return;
@@ -813,8 +804,21 @@ async function onStreamerICEStateChange(upstream, iceState) {
                 upstream.streamerDataConsumer.sctpStreamParameters.streamId
             );
         }
-        if (streamer === upstream && !sendSignalling({ type: 'startStreaming' })) {
-            onStreamerDisconnected(false);
+        if (streamer === upstream) {
+            if (!sendSignalling({ type: 'startStreaming' })) {
+                onStreamerDisconnected(false);
+                return;
+            }
+            upstream.readyForPeers = true;
+            const readyPeers = [...waitingPeers];
+            await Promise.all(readyPeers.map(peerId => runSafely(
+                `Failed to connect waiting player ${peerId}`,
+                () => {
+                    if (waitingPeers.delete(peerId)) {
+                        return onPeerConnected(peerId);
+                    }
+                }
+            )));
         }
     } catch (error) {
         if (streamer === upstream) {

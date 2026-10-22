@@ -17,6 +17,7 @@ module.exports = {
     onPeerConnected,
     onPeerDisconnected,
     setupPeerDataChannels,
+    completeUpstream() { return onStreamerICEStateChange(streamer, 'completed'); },
     setFanout(fanout) { routerFanout = fanout; },
     setState(socket, upstream, router) {
         signalServer = socket;
@@ -88,9 +89,13 @@ test('viewer arriving before upstream receives an offer when upstream becomes re
     assert.equal(signals.length, 0);
 
     await lifecycle.onStreamerOffer({ sdp: 'upstream-offer' });
+    assert.deepEqual(signals, [{ type: 'answer', sdp: 'upstream-answer' }],
+        'viewer negotiation must wait for upstream transport/data readiness');
+    await lifecycle.completeUpstream();
 
     assert.deepEqual(signals, [
         { type: 'answer', sdp: 'upstream-answer' },
+        { type: 'startStreaming' },
         { type: 'offer', playerId: 'early', sdp: 'viewer-offer', sfu: true, scalabilityMode: 'L1T1' }
     ]);
 });
@@ -101,8 +106,9 @@ test('viewer leaving before upstream is ready is not negotiated later', async ()
     lifecycle.onPeerDisconnected('gone');
 
     await lifecycle.onStreamerOffer({ sdp: 'upstream-offer' });
+    await lifecycle.completeUpstream();
 
-    assert.deepEqual(signals, [{ type: 'answer', sdp: 'upstream-answer' }]);
+    assert.deepEqual(signals, [{ type: 'answer', sdp: 'upstream-answer' }, { type: 'startStreaming' }]);
 });
 
 test('viewer leaving while waiting offers are scheduled is not recreated', async () => {
@@ -110,15 +116,16 @@ test('viewer leaving while waiting offers are scheduled is not recreated', async
     const send = socket.send;
     socket.send = message => {
         send(message);
-        if (JSON.parse(message).type === 'answer') {
+        if (JSON.parse(message).type === 'startStreaming') {
             queueMicrotask(() => lifecycle.onPeerDisconnected('leaving'));
         }
     };
     await lifecycle.onPeerConnected('leaving');
 
     await lifecycle.onStreamerOffer({ sdp: 'upstream-offer' });
+    await lifecycle.completeUpstream();
 
-    assert.deepEqual(signals, [{ type: 'answer', sdp: 'upstream-answer' }]);
+    assert.deepEqual(signals, [{ type: 'answer', sdp: 'upstream-answer' }, { type: 'startStreaming' }]);
 });
 
 test('waiting viewers from a lost signalling connection are not reused', async () => {
@@ -127,8 +134,21 @@ test('waiting viewers from a lost signalling connection are not reused', async (
     lifecycle.onStreamerDisconnected(false);
 
     await lifecycle.onStreamerOffer({ sdp: 'upstream-offer' });
+    await lifecycle.completeUpstream();
 
+    assert.deepEqual(signals, [{ type: 'answer', sdp: 'upstream-answer' }, { type: 'startStreaming' }]);
+});
+
+test('viewer arriving during upstream transport setup also waits for readiness', async () => {
+    const { lifecycle, signals } = createEarlyViewerHarness();
+    await lifecycle.onStreamerOffer({ sdp: 'upstream-offer' });
+    await lifecycle.onPeerConnected('during-setup');
     assert.deepEqual(signals, [{ type: 'answer', sdp: 'upstream-answer' }]);
+
+    await lifecycle.completeUpstream();
+
+    assert.deepEqual(signals.map(signal => signal.type), ['answer', 'startStreaming', 'offer']);
+    assert.equal(signals.at(-1).playerId, 'during-setup');
 });
 
 class FakeSignaller {
