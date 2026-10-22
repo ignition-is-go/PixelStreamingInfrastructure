@@ -41,6 +41,7 @@ let routerFanout;
 let streamer = null;
 const streamerGenerations = new GenerationRegistry();
 let peers = new Map();
+const waitingPeers = new Set();
 let dataRouter;
 let scalabilityMode = "L1T1"; // Scalability mode defaults to L1T1 and is set by the offer from the streamer
 
@@ -252,6 +253,16 @@ async function onStreamerOffer(msg) {
         console.log("Sending answer to streamer.");
         if (!sendSignalling({ type: "answer", sdp: sdpEndpoint.createAnswer() })) {
             onStreamerDisconnected(false);
+        } else {
+            const readyPeers = [...waitingPeers];
+            await Promise.all(readyPeers.map(peerId => runSafely(
+                `Failed to connect waiting player ${peerId}`,
+                () => {
+                    if (waitingPeers.delete(peerId)) {
+                        return onPeerConnected(peerId);
+                    }
+                }
+            )));
         }
     } catch (error) {
         if (streamerGenerations.pending === candidate) {
@@ -276,6 +287,10 @@ async function onStreamerOffer(msg) {
 
 function onStreamerDisconnected(notifySignalling = true) {
     console.log("Streamer disconnected");
+
+    if (!notifySignalling) {
+        waitingPeers.clear();
+    }
 
     if (notifySignalling) {
         sendSignalling({ type: 'unsubscribe' });
@@ -370,9 +385,12 @@ async function onPeerConnected(peerId) {
 
     const upstream = streamer;
     if (upstream === null) {
-        console.log("No streamer connected, ignoring player.");
+        console.log("Waiting for upstream before connecting player %s", peerId);
+        waitingPeers.add(peerId);
         return;
     }
+
+    waitingPeers.delete(peerId);
 
     const existingPeer = peers.get(peerId);
     if (existingPeer) {
@@ -657,6 +675,7 @@ async function onPeerAnswer(peerId, sdp) {
 
 function onPeerDisconnected(peerId) {
     console.log("Player %s disconnected", peerId);
+    waitingPeers.delete(peerId);
     const peer = peers.get(peerId);
     if (peer) {
         closePeer(peer);

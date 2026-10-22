@@ -6,14 +6,18 @@ const test = require('node:test');
 const vm = require('node:vm');
 const WebSocket = require('ws');
 
-function loadSfuLifecycle() {
+function loadSfuLifecycle(bridge) {
     const serverPath = path.resolve(__dirname, '..', 'sfu_server.js');
     const serverRequire = createRequire(serverPath);
     const source = `${fs.readFileSync(serverPath, 'utf8')}
 module.exports = {
     onStreamerDisconnected,
     onStreamerList,
+    onStreamerOffer,
+    onPeerConnected,
+    onPeerDisconnected,
     setupPeerDataChannels,
+    setFanout(fanout) { routerFanout = fanout; },
     setState(socket, upstream, router) {
         signalServer = socket;
         streamer = upstream;
@@ -36,13 +40,96 @@ module.exports = {
     const context = vm.createContext({
         console: { error() {}, log() {}, warn() {} },
         module,
-        require: serverRequire,
+        require: name => name === '@epicgames-ps/mediasoup-sdp-bridge' && bridge ? bridge : serverRequire(name),
         setTimeout() { return {}; }
     });
 
     vm.runInContext(source, context, { filename: serverPath });
     return module.exports;
 }
+
+function createEarlyViewerHarness() {
+    const lifecycle = loadSfuLifecycle({
+        createSdpEndpoint() {
+            return {
+                async processOffer() { return { producers: [], dataEnabled: false }; },
+                createAnswer() { return 'upstream-answer'; },
+                createOffer() { return 'viewer-offer'; }
+            };
+        }
+    });
+    const signals = [];
+    const socket = {
+        readyState: WebSocket.OPEN,
+        send(message) { signals.push(JSON.parse(message)); }
+    };
+    const transport = () => ({ closed: false, close() { this.closed = true; } });
+    lifecycle.setState(socket, null, { closeStreamer() {} });
+    lifecycle.setFanout({
+        async createIngressTransport() { return transport(); },
+        openGeneration() {
+            return {
+                async openPlayer() {
+                    return { kind: 'ready', route: {
+                        transport: transport(), rtpCapabilities: {}, mediaProducers: [], close() {}
+                    } };
+                },
+                close() {}
+            };
+        }
+    });
+    return { lifecycle, signals, socket };
+}
+
+test('viewer arriving before upstream receives an offer when upstream becomes ready', async () => {
+    const { lifecycle, signals } = createEarlyViewerHarness();
+    await lifecycle.onPeerConnected('early');
+    await lifecycle.onPeerConnected('early');
+    assert.equal(signals.length, 0);
+
+    await lifecycle.onStreamerOffer({ sdp: 'upstream-offer' });
+
+    assert.deepEqual(signals, [
+        { type: 'answer', sdp: 'upstream-answer' },
+        { type: 'offer', playerId: 'early', sdp: 'viewer-offer', sfu: true, scalabilityMode: 'L1T1' }
+    ]);
+});
+
+test('viewer leaving before upstream is ready is not negotiated later', async () => {
+    const { lifecycle, signals } = createEarlyViewerHarness();
+    await lifecycle.onPeerConnected('gone');
+    lifecycle.onPeerDisconnected('gone');
+
+    await lifecycle.onStreamerOffer({ sdp: 'upstream-offer' });
+
+    assert.deepEqual(signals, [{ type: 'answer', sdp: 'upstream-answer' }]);
+});
+
+test('viewer leaving while waiting offers are scheduled is not recreated', async () => {
+    const { lifecycle, signals, socket } = createEarlyViewerHarness();
+    const send = socket.send;
+    socket.send = message => {
+        send(message);
+        if (JSON.parse(message).type === 'answer') {
+            queueMicrotask(() => lifecycle.onPeerDisconnected('leaving'));
+        }
+    };
+    await lifecycle.onPeerConnected('leaving');
+
+    await lifecycle.onStreamerOffer({ sdp: 'upstream-offer' });
+
+    assert.deepEqual(signals, [{ type: 'answer', sdp: 'upstream-answer' }]);
+});
+
+test('waiting viewers from a lost signalling connection are not reused', async () => {
+    const { lifecycle, signals } = createEarlyViewerHarness();
+    await lifecycle.onPeerConnected('old-socket');
+    lifecycle.onStreamerDisconnected(false);
+
+    await lifecycle.onStreamerOffer({ sdp: 'upstream-offer' });
+
+    assert.deepEqual(signals, [{ type: 'answer', sdp: 'upstream-answer' }]);
+});
 
 class FakeSignaller {
     constructor() {
