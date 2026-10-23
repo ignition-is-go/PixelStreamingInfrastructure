@@ -172,6 +172,11 @@ export class SFUConnection extends EventEmitter implements IPlayer, IStreamer, L
 
         this.protocol.on(Messages.offer.typeName, this.sendToPlayer.bind(this));
         this.protocol.on(Messages.answer.typeName, this.sendToStreamer.bind(this));
+        this.protocol.on(Messages.sfuHealth.typeName, (message: Messages.sfuHealth) => {
+            message.playerId = this.playerId;
+            message.sfuStreamerId = this.streamerId;
+            this.sendToStreamer(message);
+        });
         this.protocol.on(Messages.peerDataChannels.typeName, this.sendToPlayer.bind(this));
     }
 
@@ -228,7 +233,8 @@ export class SFUConnection extends EventEmitter implements IPlayer, IStreamer, L
         const connectedMessage = MessageHelpers.createMessage(Messages.playerConnected, {
             playerId: this.playerId,
             dataChannel: true,
-            sfu: true
+            sfu: true,
+            sfuStreamerId: this.streamerId
         });
         this.sendToStreamer(connectedMessage);
     }

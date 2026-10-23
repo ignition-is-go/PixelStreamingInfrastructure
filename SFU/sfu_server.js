@@ -1,4 +1,5 @@
 const config = require('./config');
+const { startHealthReporter } = require('./health');
 const WebSocket = require('ws');
 const mediasoup = require('mediasoup');
 const mediasoupSdp = require('@epicgames-ps/mediasoup-sdp-bridge');
@@ -848,6 +849,16 @@ async function main() {
     dataRouter = await createDataRouter(routerFanout.ingressRouter);
 
     connectSignalling(config.signallingURL);
+    if (config.healthReportingEnabled === true) {
+        startHealthReporter({
+            intervalMs: config.healthIntervalMs ?? 1000,
+            maxAgeMs: config.healthMaxAgeMs ?? 3 * (config.healthIntervalMs ?? 1000),
+            current: () => streamer,
+            peers: upstream => [...peers.values()].filter(peer => isCurrentPeer(peer, upstream)),
+            send: report => sendSignalling({ type: 'sfuHealth', report: JSON.stringify(report) }),
+            onError: error => console.warn(`SFU health collection failed: ${error.message}`)
+        });
+    }
 }
 
 if (require.main === module) {

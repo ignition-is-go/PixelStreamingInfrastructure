@@ -28,6 +28,13 @@ const config = {
   // The ID for this SFU to use. This will show up as a streamer ID on the signalling server
   SFUId: "SFU",
 
+  // Status sampling is independent of media forwarding.
+  // Enable only when the subscribed upstream consumes sfuHealth reports.
+  healthReportingEnabled: false,
+  healthIntervalMs: 1000,
+  // A dashboard must stop treating a report as current after three missed samples.
+  healthMaxAgeMs: 3000,
+
   // The ID of the streamer to subscribe to. If you leave this blank it will subscribe to the first streamer it sees.
   subscribeStreamerId: "DefaultStreamer",
 

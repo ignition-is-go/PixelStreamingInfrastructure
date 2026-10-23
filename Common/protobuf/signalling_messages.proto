@@ -151,6 +151,8 @@ message playerConnected {
   bool sfu = 3;
   // The ID of the player that connected.
   string playerId = 5;
+  // Registered SFU streamer identity, independent of its transient player ID.
+  optional string sfuStreamerId = 6;
 }
 
 /**
@@ -372,4 +374,13 @@ message stats {
   string type = 1;
   // The stats data to echo.
   string data = 2;
+}
+
+// Receiver-side observations forwarded only to this SFU's subscribed streamer.
+message sfuHealth {
+  string type = 1;
+  string playerId = 2;
+  string sfuStreamerId = 3;
+  // Native SFU health snapshot. Consumers validate the snapshot at their boundary.
+  string report = 4;
 }
