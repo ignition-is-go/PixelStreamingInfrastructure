@@ -284,6 +284,12 @@ export interface playerConnected {
      * @generated from protobuf field: string playerId = 5
      */
     playerId: string;
+    /**
+     * Registered SFU streamer identity, independent of its transient player ID.
+     *
+     * @generated from protobuf field: optional string sfuStreamerId = 6
+     */
+    sfuStreamerId?: string;
 }
 /**
  * *
@@ -729,6 +735,31 @@ export interface stats {
      * @generated from protobuf field: string data = 2
      */
     data: string;
+}
+/**
+ * Receiver-side observations forwarded only to this SFU's subscribed streamer.
+ *
+ * @generated from protobuf message sfuHealth
+ */
+export interface sfuHealth {
+    /**
+     * @generated from protobuf field: string type = 1
+     */
+    type: string;
+    /**
+     * @generated from protobuf field: string playerId = 2
+     */
+    playerId: string;
+    /**
+     * @generated from protobuf field: string sfuStreamerId = 3
+     */
+    sfuStreamerId: string;
+    /**
+     * Native SFU health snapshot. Consumers validate the snapshot at their boundary.
+     *
+     * @generated from protobuf field: string report = 4
+     */
+    report: string;
 }
 // @generated message type with reflection information, may provide speed optimized methods
 class base_message$Type extends MessageType<base_message> {
@@ -1361,7 +1392,8 @@ class playerConnected$Type extends MessageType<playerConnected> {
             { no: 1, name: "type", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
             { no: 2, name: "dataChannel", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
             { no: 3, name: "sfu", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
-            { no: 5, name: "playerId", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+            { no: 5, name: "playerId", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 6, name: "sfuStreamerId", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
         ]);
     }
     create(value?: PartialMessage<playerConnected>): playerConnected {
@@ -1391,6 +1423,9 @@ class playerConnected$Type extends MessageType<playerConnected> {
                 case /* string playerId */ 5:
                     message.playerId = reader.string();
                     break;
+                case /* optional string sfuStreamerId */ 6:
+                    message.sfuStreamerId = reader.string();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -1415,6 +1450,9 @@ class playerConnected$Type extends MessageType<playerConnected> {
         /* string playerId = 5; */
         if (message.playerId !== "")
             writer.tag(5, WireType.LengthDelimited).string(message.playerId);
+        /* optional string sfuStreamerId = 6; */
+        if (message.sfuStreamerId !== undefined)
+            writer.tag(6, WireType.LengthDelimited).string(message.sfuStreamerId);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -2500,3 +2538,74 @@ class stats$Type extends MessageType<stats> {
  * @generated MessageType for protobuf message stats
  */
 export const stats = new stats$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class sfuHealth$Type extends MessageType<sfuHealth> {
+    constructor() {
+        super("sfuHealth", [
+            { no: 1, name: "type", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "playerId", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 3, name: "sfuStreamerId", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 4, name: "report", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<sfuHealth>): sfuHealth {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.type = "";
+        message.playerId = "";
+        message.sfuStreamerId = "";
+        message.report = "";
+        if (value !== undefined)
+            reflectionMergePartial<sfuHealth>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: sfuHealth): sfuHealth {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string type */ 1:
+                    message.type = reader.string();
+                    break;
+                case /* string playerId */ 2:
+                    message.playerId = reader.string();
+                    break;
+                case /* string sfuStreamerId */ 3:
+                    message.sfuStreamerId = reader.string();
+                    break;
+                case /* string report */ 4:
+                    message.report = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: sfuHealth, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string type = 1; */
+        if (message.type !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.type);
+        /* string playerId = 2; */
+        if (message.playerId !== "")
+            writer.tag(2, WireType.LengthDelimited).string(message.playerId);
+        /* string sfuStreamerId = 3; */
+        if (message.sfuStreamerId !== "")
+            writer.tag(3, WireType.LengthDelimited).string(message.sfuStreamerId);
+        /* string report = 4; */
+        if (message.report !== "")
+            writer.tag(4, WireType.LengthDelimited).string(message.report);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message sfuHealth
+ */
+export const sfuHealth = new sfuHealth$Type();
