@@ -44,3 +44,14 @@ test('freshness deadline is explicit in published reports', async () => {
     stop();
     assert.equal(report.validUntilMs - report.collectedAtMs, 3000);
 });
+
+test('slow collection does not renew the age of an older sample', async () => {
+    const input = upstream();
+    let finish;
+    input.producers[0].getStats = () => new Promise(resolve => { finish = resolve; });
+    const pending = collectHealth(input, []);
+    const issuedAt = Date.now();
+    await new Promise(resolve => setTimeout(resolve, 25));
+    finish([row('inbound-rtp', 10)]);
+    assert.ok((await pending).collectedAtMs <= issuedAt);
+});

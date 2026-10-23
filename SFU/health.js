@@ -14,6 +14,7 @@ async function mediaObservation(media, direction) {
 }
 
 async function collectHealth(upstream, peers) {
+    const collectedAtMs = Date.now();
     const [inputs, viewers] = await Promise.all([
         Promise.all(upstream.producers.map(producer => mediaObservation(producer, 'in'))),
         Promise.all(peers.map(async peer => ({
@@ -28,7 +29,7 @@ async function collectHealth(upstream, peers) {
         iceState: upstream.transport.iceState,
         dtlsState: upstream.transport.dtlsState,
         inputs, viewers,
-        collectedAtMs: Date.now()
+        collectedAtMs
     };
 }
 
