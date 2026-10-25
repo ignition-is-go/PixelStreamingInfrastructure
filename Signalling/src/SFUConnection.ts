@@ -1,5 +1,6 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 import type { IncomingMessage } from 'http';
+import { randomUUID } from 'crypto';
 import WebSocket from 'ws';
 import {
     ITransport,
@@ -32,6 +33,7 @@ import { SignallingServer } from './SignallingServer';
  * streaming: True when the streamer is ready to accept subscriptions.
  */
 export class SFUConnection extends EventEmitter implements IPlayer, IStreamer, LogUtils.IMessageLogger {
+    readonly sessionId: string;
     // The player id related to this SFU connection.
     playerId: string;
     // The streamer id related to this SFU connection.
@@ -57,6 +59,8 @@ export class SFUConnection extends EventEmitter implements IPlayer, IStreamer, L
     private layerPreferenceListener: (message: Messages.layerPreference) => void;
     private streamerIdChangeListener: (newId: string) => void;
     private streamerDisconnectedListener: () => void;
+    private observedUpstreams: Map<string, IStreamer>;
+    private connectionClosed: boolean;
 
     /**
      * Construct a new SFU connection.
@@ -69,6 +73,7 @@ export class SFUConnection extends EventEmitter implements IPlayer, IStreamer, L
         super();
 
         this.server = server;
+        this.sessionId = randomUUID();
         this.transport = new WebSocketTransportNJS(ws);
         this.protocol = new SignallingProtocol(this.transport);
         this.playerId = '';
@@ -79,6 +84,8 @@ export class SFUConnection extends EventEmitter implements IPlayer, IStreamer, L
         this.subscribedStreamer = null;
         this.maxSubscribers = 0;
         this.subscribers = new Set();
+        this.observedUpstreams = new Map();
+        this.connectionClosed = false;
 
         this.transport.on('error', this.onTransportError.bind(this));
         this.transport.on('close', this.onTransportClose.bind(this));
@@ -222,7 +229,16 @@ export class SFUConnection extends EventEmitter implements IPlayer, IStreamer, L
             return;
         }
 
+        if (this.subscribedStreamer === streamer) {
+            this.sendSignallingState(streamer, 'connected', 'active', 'SFU session subscription active');
+            return;
+        }
+        if (this.subscribedStreamer) {
+            this.unsubscribe('SFU session rebound to another streamer');
+        }
+
         this.subscribedStreamer = streamer;
+        this.observedUpstreams.set(streamer.streamerId, streamer);
         // Register as a subscriber of the upstream streamer so it will forward signalling messages
         // back to this SFU (the streamer's forwardMessage only sends to subscribed players).
         this.subscribedStreamer.subscribers.add(this.playerId);
@@ -237,12 +253,19 @@ export class SFUConnection extends EventEmitter implements IPlayer, IStreamer, L
             sfuStreamerId: this.streamerId
         });
         this.sendToStreamer(connectedMessage);
+        this.sendSignallingState(streamer, 'connected', 'active', 'SFU session subscription active');
     }
 
-    private unsubscribe() {
+    private unsubscribe(
+        detail = 'SFU session unsubscribed',
+        connectionState: 'connected' | 'disconnected' = 'connected'
+    ): IStreamer | null {
         if (!this.subscribedStreamer) {
-            return;
+            return null;
         }
+
+        const upstream = this.subscribedStreamer;
+        this.sendSignallingState(upstream, connectionState, 'detached', detail);
 
         const disconnectedMessage = MessageHelpers.createMessage(Messages.playerDisconnected, {
             playerId: this.playerId
@@ -256,6 +279,26 @@ export class SFUConnection extends EventEmitter implements IPlayer, IStreamer, L
         this.subscribedStreamer = null;
 
         this.kickDependents();
+        return upstream;
+    }
+
+    private sendSignallingState(
+        upstream: IStreamer,
+        connectionState: 'connected' | 'disconnected',
+        subscriptionState: 'active' | 'detached',
+        detail: string
+    ): void {
+        upstream.protocol.sendMessage(
+            MessageHelpers.createMessage(Messages.sfuSignallingState, {
+                sessionId: this.sessionId,
+                sfuStreamerId: this.streamerId,
+                upstreamStreamerId: upstream.streamerId,
+                connectionState,
+                subscriptionState,
+                detail,
+                playerId: this.playerId
+            })
+        );
     }
 
     /**
@@ -331,7 +374,21 @@ export class SFUConnection extends EventEmitter implements IPlayer, IStreamer, L
     }
 
     private disconnect() {
-        this.unsubscribe();
+        if (this.connectionClosed) {
+            return;
+        }
+        this.connectionClosed = true;
+        const activeUpstream = this.unsubscribe('SFU signalling socket disconnected', 'disconnected');
+        for (const upstream of this.observedUpstreams.values()) {
+            if (upstream !== activeUpstream) {
+                this.sendSignallingState(
+                    upstream,
+                    'disconnected',
+                    'detached',
+                    'SFU signalling socket disconnected'
+                );
+            }
+        }
         this.protocol.disconnect();
         this.emit('disconnect');
     }
@@ -346,7 +403,7 @@ export class SFUConnection extends EventEmitter implements IPlayer, IStreamer, L
     }
 
     private onStreamerDisconnected(): void {
-        this.unsubscribe();
+        this.unsubscribe('Upstream streamer signalling socket disconnected');
         this.sendMessage(MessageHelpers.createMessage(Messages.streamerDisconnected));
         this.streaming = false;
         this.emit('disconnect');

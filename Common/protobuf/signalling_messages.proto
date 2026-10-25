@@ -384,3 +384,18 @@ message sfuHealth {
   // Native SFU health snapshot. Consumers validate the snapshot at their boundary.
   string report = 4;
 }
+
+// Signalling-server-owned lifecycle observation for one SFU socket session.
+message sfuSignallingState {
+  string type = 1;
+  string sessionId = 2;
+  string sfuStreamerId = 3;
+  string upstreamStreamerId = 4;
+  // Actual SFU WebSocket state: connected or disconnected.
+  string connectionState = 5;
+  // Relationship to upstreamStreamerId: active or detached.
+  string subscriptionState = 6;
+  string detail = 7;
+  // Transient player identity used by the streamer's media session.
+  string playerId = 8;
+}

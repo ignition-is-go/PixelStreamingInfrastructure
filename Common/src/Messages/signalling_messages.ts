@@ -761,6 +761,51 @@ export interface sfuHealth {
      */
     report: string;
 }
+/**
+ * Signalling-server-owned lifecycle observation for one SFU socket session.
+ *
+ * @generated from protobuf message sfuSignallingState
+ */
+export interface sfuSignallingState {
+    /**
+     * @generated from protobuf field: string type = 1
+     */
+    type: string;
+    /**
+     * @generated from protobuf field: string sessionId = 2
+     */
+    sessionId: string;
+    /**
+     * @generated from protobuf field: string sfuStreamerId = 3
+     */
+    sfuStreamerId: string;
+    /**
+     * @generated from protobuf field: string upstreamStreamerId = 4
+     */
+    upstreamStreamerId: string;
+    /**
+     * Actual SFU WebSocket state: connected or disconnected.
+     *
+     * @generated from protobuf field: string connectionState = 5
+     */
+    connectionState: string;
+    /**
+     * Relationship to upstreamStreamerId: active or detached.
+     *
+     * @generated from protobuf field: string subscriptionState = 6
+     */
+    subscriptionState: string;
+    /**
+     * @generated from protobuf field: string detail = 7
+     */
+    detail: string;
+    /**
+     * Transient player identity used by the streamer's media session.
+     *
+     * @generated from protobuf field: string playerId = 8
+     */
+    playerId: string;
+}
 // @generated message type with reflection information, may provide speed optimized methods
 class base_message$Type extends MessageType<base_message> {
     constructor() {
@@ -2609,3 +2654,106 @@ class sfuHealth$Type extends MessageType<sfuHealth> {
  * @generated MessageType for protobuf message sfuHealth
  */
 export const sfuHealth = new sfuHealth$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class sfuSignallingState$Type extends MessageType<sfuSignallingState> {
+    constructor() {
+        super("sfuSignallingState", [
+            { no: 1, name: "type", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "sessionId", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 3, name: "sfuStreamerId", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 4, name: "upstreamStreamerId", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 5, name: "connectionState", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 6, name: "subscriptionState", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 7, name: "detail", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 8, name: "playerId", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<sfuSignallingState>): sfuSignallingState {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.type = "";
+        message.sessionId = "";
+        message.sfuStreamerId = "";
+        message.upstreamStreamerId = "";
+        message.connectionState = "";
+        message.subscriptionState = "";
+        message.detail = "";
+        message.playerId = "";
+        if (value !== undefined)
+            reflectionMergePartial<sfuSignallingState>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: sfuSignallingState): sfuSignallingState {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string type */ 1:
+                    message.type = reader.string();
+                    break;
+                case /* string sessionId */ 2:
+                    message.sessionId = reader.string();
+                    break;
+                case /* string sfuStreamerId */ 3:
+                    message.sfuStreamerId = reader.string();
+                    break;
+                case /* string upstreamStreamerId */ 4:
+                    message.upstreamStreamerId = reader.string();
+                    break;
+                case /* string connectionState */ 5:
+                    message.connectionState = reader.string();
+                    break;
+                case /* string subscriptionState */ 6:
+                    message.subscriptionState = reader.string();
+                    break;
+                case /* string detail */ 7:
+                    message.detail = reader.string();
+                    break;
+                case /* string playerId */ 8:
+                    message.playerId = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: sfuSignallingState, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string type = 1; */
+        if (message.type !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.type);
+        /* string sessionId = 2; */
+        if (message.sessionId !== "")
+            writer.tag(2, WireType.LengthDelimited).string(message.sessionId);
+        /* string sfuStreamerId = 3; */
+        if (message.sfuStreamerId !== "")
+            writer.tag(3, WireType.LengthDelimited).string(message.sfuStreamerId);
+        /* string upstreamStreamerId = 4; */
+        if (message.upstreamStreamerId !== "")
+            writer.tag(4, WireType.LengthDelimited).string(message.upstreamStreamerId);
+        /* string connectionState = 5; */
+        if (message.connectionState !== "")
+            writer.tag(5, WireType.LengthDelimited).string(message.connectionState);
+        /* string subscriptionState = 6; */
+        if (message.subscriptionState !== "")
+            writer.tag(6, WireType.LengthDelimited).string(message.subscriptionState);
+        /* string detail = 7; */
+        if (message.detail !== "")
+            writer.tag(7, WireType.LengthDelimited).string(message.detail);
+        /* string playerId = 8; */
+        if (message.playerId !== "")
+            writer.tag(8, WireType.LengthDelimited).string(message.playerId);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message sfuSignallingState
+ */
+export const sfuSignallingState = new sfuSignallingState$Type();
