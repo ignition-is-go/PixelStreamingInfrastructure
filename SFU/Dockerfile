@@ -2,6 +2,7 @@
 FROM node:lts
 
 COPY NODE_VERSION ./NODE_VERSION
+COPY /vendor /vendor
 COPY /SFU /SFU
 
 RUN SFU/platform_scripts/bash/setup.sh

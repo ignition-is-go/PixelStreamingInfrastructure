@@ -3,6 +3,7 @@ FROM node:lts
 # Copy the signalling server and frontend source code from the build context
 WORKDIR /SignallingWebServer
 COPY NODE_VERSION ./NODE_VERSION
+COPY /vendor ./vendor
 COPY package.json ./package.json
 COPY package-lock.json ./package-lock.json
 COPY /Common ./Common

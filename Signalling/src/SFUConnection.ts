@@ -1,5 +1,6 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 import type { IncomingMessage } from 'http';
+import type { SfuSignallingStateMessage } from '@ignition-is-go/pulse-reporting-types';
 import { randomUUID } from 'crypto';
 import WebSocket from 'ws';
 import {
@@ -284,8 +285,8 @@ export class SFUConnection extends EventEmitter implements IPlayer, IStreamer, L
 
     private sendSignallingState(
         upstream: IStreamer,
-        connectionState: 'connected' | 'disconnected',
-        subscriptionState: 'active' | 'detached',
+        connectionState: Exclude<SfuSignallingStateMessage['connectionState'], 'unknown'>,
+        subscriptionState: Exclude<SfuSignallingStateMessage['subscriptionState'], 'unknown'>,
         detail: string
     ): void {
         upstream.protocol.sendMessage(
@@ -297,7 +298,7 @@ export class SFUConnection extends EventEmitter implements IPlayer, IStreamer, L
                 subscriptionState,
                 detail,
                 playerId: this.playerId
-            })
+            } satisfies SfuSignallingStateMessage)
         );
     }
 
