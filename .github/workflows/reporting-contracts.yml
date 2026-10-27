@@ -1,0 +1,63 @@
+name: Reporting contracts
+
+on:
+    pull_request:
+        paths:
+            - '.github/workflows/reporting-contracts.yml'
+            - 'scripts/*reporting-types.mjs'
+            - 'vendor/**'
+            - 'SFU/**'
+            - 'Signalling/**'
+            - 'SignallingWebServer/**'
+            - 'package.json'
+            - 'package-lock.json'
+            - '.dockerignore'
+            - 'Extras/mediasoup-sdp-bridge/**'
+            - 'NODE_VERSION'
+    workflow_dispatch:
+
+permissions:
+    contents: read
+
+jobs:
+    generated-source:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+              with:
+                  persist-credentials: false
+            - uses: actions/setup-node@v4
+              with:
+                  node-version-file: NODE_VERSION
+            - name: Test offline archive verification
+              run: node scripts/test-reporting-types.mjs
+            - uses: dtolnay/rust-toolchain@stable
+            - uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3
+              id: reporting
+              with:
+                  app-id: ${{ vars.RELEASE_APP_ID }}
+                  private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+                  owner: ignition-is-go
+                  repositories: pulse-reporting
+                  permission-contents: read
+            - name: Verify archive against generated source
+              env:
+                  DEPENDENCY_TOKEN: ${{ steps.reporting.outputs.token }}
+              run: |
+                  authorization=$(printf 'x-access-token:%s' "$DEPENDENCY_TOKEN" | base64 | tr -d '\n')
+                  echo "::add-mask::$authorization"
+                  export GIT_CONFIG_COUNT=1
+                  export GIT_CONFIG_KEY_0=http.https://github.com/ignition-is-go/pulse-reporting.git.extraheader
+                  export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $authorization"
+                  node scripts/update-reporting-types.mjs --check-source
+
+    containers:
+        runs-on: ubuntu-latest
+        strategy:
+            fail-fast: false
+            matrix:
+                component: [SFU, SignallingWebServer]
+        steps:
+            - uses: actions/checkout@v4
+            - name: Build from a cold context without private credentials
+              run: docker build --no-cache --file '${{ matrix.component }}/Dockerfile' .

@@ -1,6 +1,6 @@
 {
     "source": "https://github.com/ignition-is-go/pulse-reporting.git",
-    "revision": "9ec517100b51495708a20eaf5fdf4628b9f24633",
-    "version": "0.1.0",
-    "sha256": "cb2210f8713b3bc867c2bb4894dca79066895cabfad9bd124a5761b8de53d7bf"
+    "revision": "99a8cd36b6a035599c4fc1a8c8f1bafa186e937b",
+    "version": "0.1.2",
+    "sha256": "eba516da76b9cbc344ec3893525fcea216434f81e72d0881eb64c1933ed7eb3b"
 }
