@@ -7,3 +7,5 @@ SignallingWebServer/platform_scripts/cmd/node/
 SignallingWebServer/platform_scripts/bash/node/
 SignallingWebServer/logs/
 SignallingWebServer/www/
+
+Extras/mediasoup-sdp-bridge/lib/

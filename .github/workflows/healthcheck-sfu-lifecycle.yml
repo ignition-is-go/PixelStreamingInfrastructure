@@ -6,6 +6,9 @@ on:
         paths:
             - '.github/workflows/healthcheck-sfu-lifecycle.yml'
             - 'SFU/**'
+            - 'vendor/**'
+            - 'scripts/update-reporting-types.mjs'
+            - 'package-lock.json'
 
 permissions:
     contents: read
@@ -23,8 +26,11 @@ jobs:
                   node-version-file: NODE_VERSION
                   cache: npm
 
+            - name: Verify reporting contract archive
+              run: node scripts/update-reporting-types.mjs --check
+
             - name: Install locked dependencies
               run: npm ci --workspace=SFU
 
             - name: Test SFU lifecycle races
-              run: node --test SFU/tests/*.test.js
+              run: npm test --workspace SFU

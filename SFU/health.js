@@ -1,3 +1,19 @@
+/**
+ * @typedef {import('@ignition-is-go/pulse-reporting-types').SfuHealth} SfuHealth
+ * @typedef {import('@ignition-is-go/pulse-reporting-types').MediaHealth} MediaHealth
+ * @typedef {import('mediasoup').types.Producer} Producer
+ * @typedef {import('mediasoup').types.Consumer} Consumer
+ * @typedef {Pick<Producer, 'id' | 'kind' | 'paused'> & Partial<Pick<Consumer, 'producerPaused'>> & { getStats: Consumer['getStats'] }} ObservedMedia
+ * @typedef {Pick<import('mediasoup').types.WebRtcTransport, 'iceState' | 'dtlsState'>} ObservedTransport
+ * @typedef {{ generation: number, transport: ObservedTransport, producers: ObservedMedia[] }} ObservedUpstream
+ * @typedef {{ id: string, transport?: ObservedTransport, consumers: ObservedMedia[] }} ObservedPeer
+ */
+
+/**
+ * @param {ObservedMedia} media
+ * @param {'in' | 'out'} direction
+ * @returns {Promise<MediaHealth>}
+ */
 async function mediaObservation(media, direction) {
     try {
         const stats = (await media.getStats()).filter(row => row.type === `${direction}bound-rtp`);
@@ -9,10 +25,15 @@ async function mediaObservation(media, direction) {
             }))
         };
     } catch (error) {
-        return { id: media.id, kind: media.kind, paused: media.paused || media.producerPaused === true, error: error.message, samples: [] };
+        return { id: media.id, kind: media.kind, paused: media.paused || media.producerPaused === true, error: error instanceof Error ? error.message : String(error), samples: [] };
     }
 }
 
+/**
+ * @param {ObservedUpstream} upstream
+ * @param {ObservedPeer[]} peers
+ * @returns {Promise<Omit<SfuHealth, 'validUntilMs'>>}
+ */
 async function collectHealth(upstream, peers) {
     const collectedAtMs = Date.now();
     const [inputs, viewers] = await Promise.all([
@@ -33,11 +54,22 @@ async function collectHealth(upstream, peers) {
     };
 }
 
+/**
+ * @param {{
+ *   intervalMs: number,
+ *   maxAgeMs: number,
+ *   current: () => ObservedUpstream | null | undefined,
+ *   peers: (upstream: ObservedUpstream) => ObservedPeer[],
+ *   send: (report: SfuHealth) => void,
+ *   onError: (error: unknown) => void
+ * }} options
+ */
 function startHealthReporter({ intervalMs, maxAgeMs, current, peers, send, onError }) {
     if (!Number.isFinite(intervalMs) || intervalMs <= 0 || !Number.isFinite(maxAgeMs) || maxAgeMs <= intervalMs) {
         throw new TypeError('healthIntervalMs must be positive and healthMaxAgeMs must exceed it');
     }
     let stopped = false;
+    /** @type {ReturnType<typeof setTimeout> | undefined} */
     let timer;
     async function sample() {
         try {
