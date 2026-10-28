@@ -169,8 +169,8 @@ test('concurrent first viewers share one complete audio and video target', async
             enableRtx
         })),
         [
-            { producerId: 'audio-1', enableSctp: true, enableRtx: false },
-            { producerId: 'video-1', enableSctp: true, enableRtx: false }
+            { producerId: 'audio-1', enableSctp: true, enableRtx: true },
+            { producerId: 'video-1', enableSctp: true, enableRtx: true }
         ]
     );
     assert.deepEqual(firstResult.route.mediaProducers.map(({ id }) => id), ['audio-1', 'video-1']);
