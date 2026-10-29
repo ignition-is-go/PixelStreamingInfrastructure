@@ -105,6 +105,16 @@ program
         config_file.sfu_port || '8889'
     )
     .option(
+        '--stream_inventory_port <port>',
+        'Private stream inventory WebSocket port. Disabled when omitted.',
+        config_file.stream_inventory_port
+    )
+    .option(
+        '--stream_inventory_address <address>',
+        'Bind address for the private stream inventory WebSocket.',
+        config_file.stream_inventory_address || '127.0.0.1'
+    )
+    .option(
         '--max_players <number>',
         'Sets the maximum number of subscribers per streamer. 0 = unlimited',
         config_file.max_players || '0'
@@ -284,6 +294,14 @@ const serverOpts: IServerConfig = {
     maxSubscribers: options.max_players,
     playerKeepaliveTimeout: Number(options.player_keepalive_timeout)
 };
+
+if (options.stream_inventory_port !== undefined) {
+    const port = Number(options.stream_inventory_port);
+    if (!Number.isInteger(port) || port < 1 || port > 65535) {
+        throw new Error('stream_inventory_port must be an integer from 1 to 65535');
+    }
+    serverOpts.streamInventory = { host: options.stream_inventory_address, port };
+}
 
 if (process.env.TURN_CONFIG_FILE) {
     const peerOptionsProviders = loadTurnPeerOptionsProviders(process.env.TURN_CONFIG_FILE);

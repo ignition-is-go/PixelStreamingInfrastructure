@@ -165,6 +165,7 @@ export class StreamerConnection extends EventEmitter implements IStreamer, LogUt
 
     private onEndpointId(_message: Messages.endpointId): void {
         this.streaming = true; // we're ready to stream when we id ourselves
+        this.server.streamerRegistry.notifyChanged();
     }
 
     private onDisconnectPlayerRequest(message: Messages.disconnectPlayer): void {

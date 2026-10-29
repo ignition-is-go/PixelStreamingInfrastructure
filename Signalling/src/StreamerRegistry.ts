@@ -117,6 +117,7 @@ export class StreamerRegistry extends EventEmitter {
         streamer.sendMessage(MessageHelpers.createMessage(Messages.identify));
 
         this.emit('added', streamer.streamerId);
+        this.notifyChanged();
 
         return true;
     }
@@ -136,6 +137,7 @@ export class StreamerRegistry extends EventEmitter {
         }
         this.streamers.splice(index, 1);
         this.emit('removed', streamer.streamerId);
+        this.notifyChanged();
         return true;
     }
 
@@ -240,11 +242,22 @@ export class StreamerRegistry extends EventEmitter {
 
         Logger.debug(`StreamerRegistry: Streamer id change. ${oldId} -> ${streamer.streamerId}`);
         streamer.emit('id_changed', streamer.streamerId);
+        this.notifyChanged();
 
         // because we might have sanitized the id, we confirm the id back to the streamer
         streamer.sendMessage(
             MessageHelpers.createMessage(Messages.endpointIdConfirm, { committedId: streamer.streamerId })
         );
+    }
+
+    /** Streamers offered by the player discovery protocol. */
+    availableToPlayers(): IStreamer[] {
+        return this.streamers.filter((streamer) => streamer.streaming);
+    }
+
+    /** Notify observers after a registered stream's availability or upstream changes. */
+    notifyChanged(): void {
+        this.emit('changed');
     }
 
     private sanitizeStreamerId(id: string): string {

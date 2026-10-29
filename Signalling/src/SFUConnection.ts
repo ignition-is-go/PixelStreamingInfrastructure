@@ -239,6 +239,7 @@ export class SFUConnection extends EventEmitter implements IPlayer, IStreamer, L
         }
 
         this.subscribedStreamer = streamer;
+        this.server.streamerRegistry.notifyChanged();
         this.observedUpstreams.set(streamer.streamerId, streamer);
         // Register as a subscriber of the upstream streamer so it will forward signalling messages
         // back to this SFU (the streamer's forwardMessage only sends to subscribed players).
@@ -278,6 +279,7 @@ export class SFUConnection extends EventEmitter implements IPlayer, IStreamer, L
         this.subscribedStreamer.off('id_changed', this.streamerIdChangeListener);
         this.subscribedStreamer.off('disconnect', this.streamerDisconnectedListener);
         this.subscribedStreamer = null;
+        this.server.streamerRegistry.notifyChanged();
 
         this.kickDependents();
         return upstream;
@@ -407,6 +409,7 @@ export class SFUConnection extends EventEmitter implements IPlayer, IStreamer, L
         this.unsubscribe('Upstream streamer signalling socket disconnected');
         this.sendMessage(MessageHelpers.createMessage(Messages.streamerDisconnected));
         this.streaming = false;
+        this.server.streamerRegistry.notifyChanged();
         this.emit('disconnect');
     }
 
@@ -451,14 +454,17 @@ export class SFUConnection extends EventEmitter implements IPlayer, IStreamer, L
 
     private onEndpointId(_message: Messages.endpointId): void {
         this.streaming = true;
+        this.server.streamerRegistry.notifyChanged();
     }
 
     private onStartStreaming(_message: Messages.startStreaming): void {
         this.streaming = true;
+        this.server.streamerRegistry.notifyChanged();
     }
 
     private onStopStreaming(_message: Messages.stopStreaming): void {
         this.streaming = false;
+        this.server.streamerRegistry.notifyChanged();
         this.emit('disconnect');
     }
 
