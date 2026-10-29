@@ -1,5 +1,12 @@
 const { runSafely } = require('./async_helpers');
 
+const pipeListenInfo = {
+    protocol: 'udp',
+    ip: '127.0.0.1',
+    sendBufferSize: 8 * 1024 * 1024,
+    recvBufferSize: 8 * 1024 * 1024
+};
+
 function closeIfOpen(entity) {
     if (entity && !entity.closed) {
         entity.close();
@@ -184,6 +191,7 @@ async function createRouterFanout({
                     const result = await ingressSlot.router.pipeToRouter({
                         producerId: producer.id,
                         router: slot.router,
+                        listenInfo: pipeListenInfo,
                         enableSctp: true,
                         enableRtx: true
                     });
@@ -292,6 +300,7 @@ async function createRouterFanout({
                     const result = await sourceRouter.pipeToRouter({
                         dataProducerId: dataProducer.id,
                         router: destinationRouter,
+                        listenInfo: pipeListenInfo,
                         enableSctp: true,
                         enableRtx: true
                     });

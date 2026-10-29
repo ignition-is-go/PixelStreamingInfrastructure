@@ -141,6 +141,30 @@ for (const modern of [false, true]) {
     });
 }
 
+test('media and data bootstrap create burst-sized loopback pipe sockets', async () => {
+    for (const dataFirst of [null, 'fromIngress', 'toIngress']) {
+        const { fanout, workers } = await createHarness(2);
+        const generation = fanout.openGeneration({
+            generation: 1,
+            producers: dataFirst ? [] : [mediaProducer('video', 'video')]
+        });
+        try {
+            const opened = await generation.openPlayer({ playerId: 'viewer', isCurrent: () => true });
+            if (dataFirst) await opened.route[dataFirst](new FakeEntity('data'));
+            const source = workers[dataFirst === 'toIngress' ? 1 : 0].router;
+            assert.equal(source.pipeCalls.length, 1);
+            assert.deepEqual(source.pipeCalls[0].listenInfo, {
+                protocol: 'udp',
+                ip: '127.0.0.1',
+                sendBufferSize: 8 * 1024 * 1024,
+                recvBufferSize: 8 * 1024 * 1024
+            });
+        } finally {
+            fanout.close();
+        }
+    }
+});
+
 test('concurrent first viewers share one complete audio and video target', async () => {
     const { fanout, workers } = await createHarness(2);
     const firstPipe = deferred();
