@@ -185,7 +185,7 @@ async function createRouterFanout({
                         producerId: producer.id,
                         router: slot.router,
                         enableSctp: true,
-                        enableRtx: false
+                        enableRtx: true
                     });
                     pipeResults.push(result);
                     if (generationClosed) {
@@ -292,7 +292,8 @@ async function createRouterFanout({
                     const result = await sourceRouter.pipeToRouter({
                         dataProducerId: dataProducer.id,
                         router: destinationRouter,
-                        enableSctp: true
+                        enableSctp: true,
+                        enableRtx: true
                     });
                     if (routeClosed || generationClosed || !isCurrent()) {
                         closePipeResult(result);
