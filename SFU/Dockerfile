@@ -2,6 +2,10 @@
 FROM node:22.14.0
 WORKDIR /app
 
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends python3-pip \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY NODE_VERSION ./NODE_VERSION
 COPY /vendor ./vendor
 COPY /SFU ./SFU
