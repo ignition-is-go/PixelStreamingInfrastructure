@@ -15,6 +15,7 @@ import {
     KeepaliveMonitor
 } from '@epicgames-ps/lib-pixelstreamingcommon-ue5.8';
 import { stringify } from './Utils';
+import { StreamInventoryServer } from './StreamInventoryServer';
 
 /**
  * An interface describing the possible options to pass when creating
@@ -78,6 +79,9 @@ export interface IServerConfig {
     // label, so with more than one SFU the later joiner's relayed players lose their
     // data-channel binding. The barrier guarantees which SFU that is.
     sfuSubscribeBarriers?: Record<string, string>;
+
+    // Optional private monitoring listener. Omitted by default; never mounted on the player server.
+    streamInventory?: { host: string; port: number };
 }
 
 export type ProtocolConfig = {
@@ -95,6 +99,7 @@ export class SignallingServer {
     streamerRegistry: StreamerRegistry;
     playerRegistry: PlayerRegistry;
     startTime: Date;
+    streamInventoryServer?: StreamInventoryServer;
 
     /**
      * Initializes the server object and sets up listening sockets for streamers
@@ -116,6 +121,13 @@ export class SignallingServer {
         if (!config.playerPort && !config.httpServer && !config.httpsServer) {
             Logger.error('No player port, http server or https server supplied to SignallingServer.');
             return;
+        }
+
+        if (config.streamInventory) {
+            this.streamInventoryServer = new StreamInventoryServer(
+                this.streamerRegistry,
+                config.streamInventory
+            );
         }
 
         // Streamer connections

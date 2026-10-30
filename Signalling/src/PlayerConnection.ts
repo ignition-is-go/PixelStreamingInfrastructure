@@ -239,9 +239,7 @@ export class PlayerConnection implements IPlayer, LogUtils.IMessageLogger {
 
     private onListStreamers(_message: Messages.listStreamers): void {
         const listMessage = MessageHelpers.createMessage(Messages.streamerList, {
-            ids: this.server.streamerRegistry.streamers
-                .filter((streamer) => streamer.streaming)
-                .map((streamer) => streamer.streamerId)
+            ids: this.server.streamerRegistry.availableToPlayers().map((streamer) => streamer.streamerId)
         });
         this.sendMessage(listMessage);
     }

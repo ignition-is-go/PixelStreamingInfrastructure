@@ -199,3 +199,25 @@ attempts an ICE restart, tries a new pair with expired credentials, and then
 obtains fresh credentials over WebSocket for another pair. It refuses credentials
 with more than 90 seconds remaining. Existing-pair survival does not establish
 long-term allocation refresh or automatic client renewal.
+
+## Private stream inventory
+
+The optional `--stream_inventory_port <port>` listener publishes typed JSON
+`StreamInventorySnapshot` messages over WebSocket. It is disabled by default and
+binds to `127.0.0.1` when enabled. Use `--stream_inventory_address <address>` to
+bind explicitly to a private monitoring interface. The listener is separate from
+the public player WebSocket and HTTP server; do not expose it through the public
+player ingress.
+
+An observer receives the complete current registration inventory on connection
+and after registration, removal, identity, availability or SFU upstream changes.
+There is no inventory polling, and observers do not create player sessions or
+subscribe to media. `availableToPlayers` uses the same registry projection as
+player `listStreamers`. It means the stream is offered for subscriptions, not that
+any viewer has verified audio or video reception. SFU upstream IDs come from the
+actual current subscription. No viewer counts or inferred producer hostnames are
+included. Stream IDs are scoped to this signalling server.
+
+Pulse Cluster can consume this private listener server-side and publish the
+result through its normal authenticated monitoring contract. Browser clients
+must not connect directly to this listener.
