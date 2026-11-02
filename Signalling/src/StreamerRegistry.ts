@@ -8,6 +8,7 @@ import {
     EventEmitter
 } from '@epicgames-ps/lib-pixelstreamingcommon-ue5.8';
 import type { IncomingMessage } from 'http';
+import type { StreamProducerDeclaration } from '@ignition-is-go/pulse-reporting-types';
 import { Logger } from './Logger';
 import { IMessageLogger } from './LoggingUtils';
 import { IPlayerInfo } from './PlayerRegistry';
@@ -28,6 +29,7 @@ export interface IStreamer extends EventEmitter, IMessageLogger {
     // attach an authenticated identity to the request and recover it here for authorization
     // decisions. The project intentionally ships no authentication of its own.
     request?: IncomingMessage;
+    readonly producer?: StreamProducerDeclaration;
 
     sendMessage(message: BaseMessage): void;
     getStreamerInfo(): IStreamerInfo;

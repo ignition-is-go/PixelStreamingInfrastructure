@@ -9,6 +9,7 @@ const { createRouterFanout } = require('./router_fanout');
 const { runSafely } = require('./async_helpers');
 const { GenerationRegistry } = require('./generation_registry');
 const { SignallingWatchdog, reconnectDelayMs } = require('./signalling_watchdog');
+const { producerSignallingUrl } = require('./producer_identity');
 const { StreamerLivenessMonitor } = require('./streamer_liveness');
 
 if (!config.retrySubscribeDelaySecs) {
@@ -94,7 +95,7 @@ function scheduleStreamerDiscovery() {
 
 function connectSignalling(server) {
     console.log("Connecting to Signalling Server at %s", server);
-    const socket = new WebSocket(server, {
+    const socket = new WebSocket(producerSignallingUrl(server), {
         handshakeTimeout: config.signallingConnectTimeoutSecs * 1000
     });
     signalServer = socket;

@@ -1,5 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 import type { IncomingMessage } from 'http';
+import type { StreamProducerDeclaration } from '@ignition-is-go/pulse-reporting-types';
+import { readStreamProducer } from './StreamProducerDeclaration';
 import type { SfuSignallingStateMessage } from '@ignition-is-go/pulse-reporting-types';
 import { randomUUID } from 'crypto';
 import WebSocket from 'ws';
@@ -51,6 +53,7 @@ export class SFUConnection extends EventEmitter implements IPlayer, IStreamer, L
     remoteAddress?: string;
     // The HTTP upgrade request that opened this connection, if available.
     request?: IncomingMessage;
+    readonly producer?: StreamProducerDeclaration;
     // The max number of subscribed players at a time. A value of 0 means there is no limit (this the default).
     maxSubscribers: number;
     // A list of all the current subscribed players.
@@ -82,6 +85,7 @@ export class SFUConnection extends EventEmitter implements IPlayer, IStreamer, L
         this.streaming = false;
         this.remoteAddress = remoteAddress;
         this.request = request;
+        this.producer = readStreamProducer(request, 'sfu');
         this.subscribedStreamer = null;
         this.maxSubscribers = 0;
         this.subscribers = new Set();

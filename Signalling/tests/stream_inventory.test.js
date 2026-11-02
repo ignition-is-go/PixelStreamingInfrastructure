@@ -312,7 +312,10 @@ test(
             queryFor(producer('sfu', 4294967296)),
             queryFor({ ...producer('sfu'), process: { ...producer('sfu').process, reportedHost: '  ' } }),
             queryFor({ ...producer('sfu'), process: { ...producer('sfu').process, instanceId: 'invalid' } }),
-            queryFor({ ...producer('sfu'), process: { ...producer('sfu').process, instanceId: '00000000-0000-0000-0000-000000000000' } }),
+            queryFor({
+                ...producer('sfu'),
+                process: { ...producer('sfu').process, instanceId: '00000000-0000-0000-0000-000000000000' }
+            }),
             queryFor(producer('unreal')),
             `${queryFor(producer('sfu'))}&pulseProducer=${encodeURIComponent(JSON.stringify(producer('sfu', 99)))}`
         ];
