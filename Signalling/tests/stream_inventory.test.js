@@ -331,3 +331,72 @@ test(
         }
     }
 );
+
+test(
+    'producer UUID input forms match the shared Rust contract and normalize inventory',
+    { timeout: 15000 },
+    async (t) => {
+        const signalling = {
+            config: {},
+            streamerRegistry: new StreamerRegistry(),
+            playerRegistry: new PlayerRegistry()
+        };
+        const publisher = new StreamInventoryServer(signalling.streamerRegistry, {
+            host: '127.0.0.1',
+            port: 0
+        });
+        await new Promise((resolve) => publisher.server.once('listening', resolve));
+        const observer = await connect(`ws://127.0.0.1:${publisher.server.address().port}`);
+        const connections = [];
+        t.after(async () => {
+            await publisher.close();
+            await Promise.all(connections.map((item) => item.close()));
+        });
+        const canonical = producer('unreal').process.instanceId;
+        const simple = canonical.replaceAll('-', '');
+        const nil = '00000000-0000-0000-0000-000000000000';
+        const nonRfc = 'ffffffff-ffff-ffff-ffff-ffffffffffff';
+        const cases = [
+            [canonical, canonical],
+            [simple, canonical],
+            [canonical.toUpperCase(), canonical],
+            [simple.toUpperCase(), canonical],
+            [`{${canonical}}`, canonical],
+            [`{${canonical.toUpperCase()}}`, canonical],
+            [`urn:uuid:${canonical}`, canonical],
+            [`UrN:UuId:${canonical.toUpperCase()}`, canonical],
+            [nonRfc, nonRfc],
+            [nonRfc.replaceAll('-', ''), nonRfc],
+            [nil, undefined],
+            [nil.replaceAll('-', ''), undefined],
+            [`{${nil}}`, undefined],
+            [`URN:UUID:${nil}`, undefined],
+            ['', undefined],
+            [` ${canonical}`, undefined],
+            [`${canonical}\n`, undefined],
+            [`{${simple}}`, undefined],
+            [`urn:uuid:${simple}`, undefined],
+            [`urn:uuid:{${canonical}}`, undefined],
+            [`(${canonical})`, undefined],
+            [`{${canonical}]`, undefined],
+            [`url:uuid:${canonical}`, undefined],
+            [canonical.replace('4', 'g'), undefined],
+            [canonical.replace('-', '_'), undefined],
+            [canonical.replace('4', '４'), undefined],
+            [simple.slice(1), undefined],
+            [`${simple}0`, undefined]
+        ];
+        for (const [index, [instanceId, expected]] of cases.entries()) {
+            const declaration = producer('unreal');
+            declaration.process.instanceId = instanceId;
+            const name = `uuid-${index}`;
+            connections.push(await connection(signalling, StreamerConnection, name, queryFor(declaration)));
+            const snapshot = await observer.next((value) =>
+                value.streams.some((stream) => stream.streamerId === name)
+            );
+            const stream = snapshot.streams.find((stream) => stream.streamerId === name);
+            assert.equal(stream.availableToPlayers, true);
+            assert.equal(stream.producer?.process.instanceId, expected, JSON.stringify(instanceId));
+        }
+    }
+);
