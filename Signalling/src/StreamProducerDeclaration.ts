@@ -3,6 +3,25 @@ import type { IncomingMessage } from 'http';
 import type { StreamProducerDeclaration } from '@ignition-is-go/pulse-reporting-types';
 import { Logger } from './Logger';
 
+function parseInstanceId(value: string): string {
+    let id = value;
+    if (value.length === 32) {
+        id = `${value.slice(0, 8)}-${value.slice(8, 12)}-${value.slice(12, 16)}-${value.slice(16, 20)}-${value.slice(20)}`;
+    } else if (value.length === 38 && value.startsWith('{') && value.endsWith('}')) {
+        id = value.slice(1, -1);
+    } else if (value.length === 45 && value.slice(0, 9).toLowerCase() === 'urn:uuid:') {
+        id = value.slice(9);
+    }
+    if (
+        id.length !== 36 ||
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id) ||
+        id === '00000000-0000-0000-0000-000000000000'
+    ) {
+        throw new Error('invalid producer instanceId');
+    }
+    return id.toLowerCase();
+}
+
 export function readStreamProducer(
     request: IncomingMessage | undefined,
     application: StreamProducerDeclaration['application']
@@ -37,8 +56,6 @@ export function readStreamProducer(
             process === null ||
             !('instanceId' in process) ||
             typeof process.instanceId !== 'string' ||
-            !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(process.instanceId) ||
-            process.instanceId === '00000000-0000-0000-0000-000000000000' ||
             !('reportedHost' in process) ||
             typeof process.reportedHost !== 'string' ||
             process.reportedHost.trim().length === 0 ||
@@ -53,7 +70,7 @@ export function readStreamProducer(
         return {
             application,
             process: {
-                instanceId: process.instanceId.toLowerCase(),
+                instanceId: parseInstanceId(process.instanceId),
                 reportedHost: process.reportedHost,
                 pid: process.pid
             }
