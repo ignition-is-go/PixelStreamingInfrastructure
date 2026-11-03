@@ -6,14 +6,14 @@ COPY NODE_VERSION ./NODE_VERSION
 COPY /vendor ./vendor
 COPY package.json ./package.json
 COPY package-lock.json ./package-lock.json
-COPY scripts/update-reporting-types.mjs ./scripts/update-reporting-types.mjs
+COPY scripts/update-protocol-types.mjs ./scripts/update-protocol-types.mjs
 COPY /Common ./Common
 COPY /Signalling ./Signalling
 COPY /SignallingWebServer ./SignallingWebServer
 COPY /Frontend ./Frontend
 # Install the dependencies for the signalling server and build the frontend
 RUN apt-get update
-RUN node scripts/update-reporting-types.mjs --check \
+RUN node scripts/update-protocol-types.mjs --check \
     && SignallingWebServer/platform_scripts/bash/setup.sh --build \
     && npm --workspace SignallingWebServer run build \
     && node -e "require.resolve('./SignallingWebServer/dist/index.js')"
