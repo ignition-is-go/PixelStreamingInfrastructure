@@ -1,6 +1,6 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 import type { IncomingMessage } from 'http';
-import type { SfuSignallingStateMessage } from '@ignition-is-go/pulse-reporting-types';
+import type { SfuSignallingStateMessage } from '@ignition-is-go/pulse-pixelstreaming-protocol-types';
 import { randomUUID } from 'crypto';
 import WebSocket from 'ws';
 import {

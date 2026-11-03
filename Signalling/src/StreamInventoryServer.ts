@@ -1,5 +1,5 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
-import type { StreamEndpoint, StreamInventorySnapshot } from '@ignition-is-go/pulse-reporting-types';
+import type { StreamEndpoint, StreamInventorySnapshot } from '@ignition-is-go/pulse-pixelstreaming-protocol-types';
 import { WebSocket, WebSocketServer } from 'ws';
 import { SFUConnection } from './SFUConnection';
 import { StreamerRegistry } from './StreamerRegistry';
