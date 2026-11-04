@@ -24,7 +24,7 @@ jobs:
         name: Decode in ${{ matrix.browser }}
         runs-on:
             group: ci-macos-ephemeral
-            labels: [self-hosted, macOS, ARM64, site-lucid-lab, cpu-ge-8, disk-ge-100g]
+            labels: [self-hosted, macOS, ARM64, site-lucid-lab, cpu-ge-8]
         timeout-minutes: 15
         environment: hrlv-production
         strategy:
