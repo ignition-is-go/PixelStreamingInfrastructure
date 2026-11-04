@@ -31,7 +31,7 @@ const timeoutMs = positiveInteger('PIXELSTREAM_TIMEOUT_MS', '60000');
 
 class SmokeFailure extends Error {}
 
-let builder = new Builder().setCapability('pageLoadStrategy', 'eager');
+let builder = new Builder();
 switch (browserName) {
     case 'chromium':
         builder = builder
@@ -57,6 +57,8 @@ switch (browserName) {
         throw new Error(`Unsupported browser: ${exhaustive}`);
     }
 }
+
+builder = builder.setCapability('pageLoadStrategy', 'eager');
 
 let driver;
 try {
