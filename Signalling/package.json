@@ -1,6 +1,6 @@
 {
-    "name": "@epicgames-ps/lib-pixelstreamingsignalling-ue5.7",
-    "version": "0.2.1",
+    "name": "@epicgames-ps/lib-pixelstreamingsignalling-ue5.8",
+    "version": "0.1.0",
     "description": "Basic signalling library for developers wishing to build applications that signal a Pixel Streaming application.",
     "main": "dist/cjs/pixelstreamingsignalling.js",
     "module": "dist/esm/pixelstreamingsignalling.js",
@@ -14,7 +14,7 @@
         "rebuild": "npm run clean && npm run build",
         "watch": "nodemon -V -d 3 --watch src --watch ../Common/dist -e \"ts,js,mjs,cjs,json\" --exec \"npm run build:cjs\"",
         "lint": "eslint src",
-        "test": "echo \"Error: no test specified\" && exit 1"
+        "test": "npm run build:cjs && node --test tests/*.test.js"
     },
     "author": "Epic Games",
     "license": "MIT",
@@ -33,13 +33,14 @@
         "typedoc": "^0.28.0",
         "typedoc-plugin-markdown": "^4.4.2",
         "typescript": "^5.7.3",
-        "typescript-eslint": "8.57.2"
+        "typescript-eslint": "8.57.2",
+        "@ignition-is-go/pulse-pixelstreaming-protocol-types": "file:../vendor/pulse-pixelstreaming-protocol-types.tgz"
     },
     "dependencies": {
         "body-parser": "^1.20.4",
         "cors": "^2.8.5",
         "express": "^4.22.1",
-        "express-rate-limit": "^8.2.2",
+        "express-rate-limit": "^8.5.1",
         "helmet": "^8.0.0",
         "hsts": "^2.2.0",
         "jsonc": "^2.0.0",
@@ -49,10 +50,10 @@
         "ws": "^8.18.0"
     },
     "peerDependencies": {
-        "@epicgames-ps/lib-pixelstreamingcommon-ue5.7": "^0.1.4"
+        "@epicgames-ps/lib-pixelstreamingcommon-ue5.8": "^0.1.0"
     },
     "repository": {
         "type": "git",
-        "url": "https://github.com/EpicGamesExt/PixelStreamingInfrastructure"
+        "url": "https://github.com/EpicGames/PixelStreamingInfrastructure"
     }
 }

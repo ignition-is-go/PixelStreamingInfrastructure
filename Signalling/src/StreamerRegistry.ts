@@ -6,7 +6,8 @@ import {
     MessageHelpers,
     BaseMessage,
     EventEmitter
-} from '@epicgames-ps/lib-pixelstreamingcommon-ue5.7';
+} from '@epicgames-ps/lib-pixelstreamingcommon-ue5.8';
+import type { IncomingMessage } from 'http';
 import { Logger } from './Logger';
 import { IMessageLogger } from './LoggingUtils';
 import { IPlayerInfo } from './PlayerRegistry';
@@ -22,10 +23,42 @@ export interface IStreamer extends EventEmitter, IMessageLogger {
     streaming: boolean;
     maxSubscribers: number;
     subscribers: Set<string>;
+    // The HTTP upgrade request that opened this connection, if available. The signalling server
+    // itself does not read this, but it lets a consumer-supplied verifyClient (or other front door)
+    // attach an authenticated identity to the request and recover it here for authorization
+    // decisions. The project intentionally ships no authentication of its own.
+    request?: IncomingMessage;
 
     sendMessage(message: BaseMessage): void;
     getStreamerInfo(): IStreamerInfo;
 }
+
+/**
+ * The details of a streamer's request to be known by a given id, passed to a
+ * {@link StreamerIdAuthorizer} so a consumer can decide whether to allow it.
+ */
+export interface IStreamerIdAuthRequest {
+    // The streamer connection requesting the id. Use `streamer.request` to recover any identity a
+    // consumer attached at connection time.
+    streamer: IStreamer;
+    // The raw id the streamer asked to be known by (the value it sent in its endpointId message).
+    requestedId: string;
+    // The unique id the registry would assign by default (the requested id, with a numeric suffix
+    // appended if it collided with an existing streamer).
+    sanitizedId: string;
+    // True when the requested id was already taken and so differs from the id the registry would
+    // otherwise commit. This is the condition an id-squatting attacker relies on.
+    collided: boolean;
+}
+
+/**
+ * An optional consumer-supplied hook that decides the id a streamer is allowed to register as.
+ * Return the id to commit (the sanitized id to accept the default, or any other unique id to
+ * override, e.g. to namespace per tenant), or null to reject the streamer and disconnect it.
+ * This is the seam for implementing anti-squatting / ownership policy without the project
+ * providing an authentication scheme.
+ */
+export type StreamerIdAuthorizer = (request: IStreamerIdAuthRequest) => string | null;
 
 /**
  * Used by the API to describe a streamer.
@@ -49,10 +82,15 @@ export interface IStreamerInfo {
 export class StreamerRegistry extends EventEmitter {
     streamers: IStreamer[];
     defaultStreamerIdPrefix: string = 'UnknownStreamer';
+    // Optional consumer hook to authorize/override the id a streamer registers as. See
+    // {@link StreamerIdAuthorizer}. When unset the registry keeps its default behaviour of
+    // accepting the requested id and appending a numeric suffix on collision.
+    authorizeStreamerId?: StreamerIdAuthorizer;
 
-    constructor() {
+    constructor(authorizeStreamerId?: StreamerIdAuthorizer) {
         super();
         this.streamers = [];
+        this.authorizeStreamerId = authorizeStreamerId;
     }
 
     /**
@@ -79,6 +117,7 @@ export class StreamerRegistry extends EventEmitter {
         streamer.sendMessage(MessageHelpers.createMessage(Messages.identify));
 
         this.emit('added', streamer.streamerId);
+        this.notifyChanged();
 
         return true;
     }
@@ -98,6 +137,7 @@ export class StreamerRegistry extends EventEmitter {
         }
         this.streamers.splice(index, 1);
         this.emit('removed', streamer.streamerId);
+        this.notifyChanged();
         return true;
     }
 
@@ -139,15 +179,85 @@ export class StreamerRegistry extends EventEmitter {
         const oldId = streamer.streamerId;
 
         // id might conflict or be invalid so here we sanitize it
-        streamer.streamerId = this.sanitizeStreamerId(message.id);
+        const sanitizedId = this.sanitizeStreamerId(message.id);
+
+        let committedId: string | null = sanitizedId;
+        if (this.authorizeStreamerId) {
+            // Let the consumer accept the default id, override it (e.g. namespace per tenant), or
+            // reject the registration entirely. This is where anti-squatting policy lives.
+            committedId = this.authorizeStreamerId({
+                streamer,
+                requestedId: message.id,
+                sanitizedId,
+                collided: !!message.id && sanitizedId !== message.id
+            });
+
+            if (committedId === null) {
+                Logger.warn(
+                    `StreamerRegistry: streamer id '${message.id}' (was ${oldId}) rejected by authorizer. Disconnecting.`
+                );
+                this.remove(streamer);
+                streamer.protocol.disconnect(1008, 'streamer id not authorized');
+                return;
+            }
+
+            // An override must remain unique or it would corrupt id-based lookups. If the consumer
+            // hands back an id already held by a different streamer we reject rather than clobber.
+            const existing = this.find(committedId);
+            if (existing && existing !== streamer) {
+                Logger.error(
+                    `StreamerRegistry: authorizer returned id '${committedId}' which is already in use. Disconnecting.`
+                );
+                this.remove(streamer);
+                streamer.protocol.disconnect(1008, 'streamer id not authorized');
+                return;
+            }
+        } else if (message.id) {
+            // A named endpoint reconnecting after an unclean socket close must reclaim
+            // its stable routing id. sanitizeStreamerId() intentionally suffixes an id
+            // that is still present, so restore the explicit request here and let the
+            // replacement block below evict the stale holder. Keep anonymous endpoints
+            // on the normal UnknownStreamer/UnknownStreamerN allocation path.
+            const exactHolder = this.find(message.id);
+            if (exactHolder && exactHolder !== streamer) {
+                committedId = message.id;
+            }
+        }
+
+        // Kick any existing streamer that already holds this id (ghosts left by a
+        // previous connection that died uncleanly). Without an authorizer set, the
+        // assignment below otherwise clobbers into a DUPLICATE id — streamerList shows
+        // two entries and players can subscribe to a dead one. The new connection wins,
+        // which matches what a streamer/SFU re-registering after a crash actually wants.
+        const collidingStreamer = committedId ? this.find(committedId) : undefined;
+        if (collidingStreamer && collidingStreamer !== streamer) {
+            Logger.warn(
+                `StreamerRegistry: Kicking stale streamer holding id '${committedId}' on re-registration collision.`
+            );
+            this.remove(collidingStreamer);
+            collidingStreamer.protocol.disconnect(1000, 'Replaced by new streamer with same id');
+        }
+
+        streamer.streamerId = committedId;
 
         Logger.debug(`StreamerRegistry: Streamer id change. ${oldId} -> ${streamer.streamerId}`);
         streamer.emit('id_changed', streamer.streamerId);
+        this.notifyChanged();
 
         // because we might have sanitized the id, we confirm the id back to the streamer
         streamer.sendMessage(
             MessageHelpers.createMessage(Messages.endpointIdConfirm, { committedId: streamer.streamerId })
         );
+    }
+
+    /** Streamers offered by the player discovery protocol. */
+    availableToPlayers(): IStreamer[] {
+        return this.streamers.filter((streamer) => streamer.streaming);
+    }
+
+    /** Notify observers after a registered stream's availability or upstream changes. */
+    notifyChanged(): void {
+        this.emit('changed');
     }
 
     private sanitizeStreamerId(id: string): string {

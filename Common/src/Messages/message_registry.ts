@@ -24,6 +24,8 @@ export const MessageRegistry: Record<string, IMessageType<BaseMessage>> = {
     playerDisconnected: Messages.playerDisconnected,
     pong: Messages.pong,
     stats: Messages.stats,
+    sfuHealth: Messages.sfuHealth,
+    sfuSignallingState: Messages.sfuSignallingState,
     streamerDisconnected: Messages.streamerDisconnected,
     streamerList: Messages.streamerList,
     subscribe: Messages.subscribe,

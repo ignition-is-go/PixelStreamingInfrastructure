@@ -1,6 +1,6 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
-import { Logger } from '@epicgames-ps/lib-pixelstreamingcommon-ue5.7';
+import { Logger } from '@epicgames-ps/lib-pixelstreamingcommon-ue5.8';
 
 export class ToStreamerMessage {
     id: number;
@@ -8,7 +8,7 @@ export class ToStreamerMessage {
 }
 
 export class StreamMessageController {
-    toStreamerHandlers: Map<string, (messageData?: Array<number | string>) => void>;
+    toStreamerHandlers: Map<string, (messageData?: Array<number | string | Uint8Array>) => void>;
     fromStreamerHandlers: Map<string, (messageType: string, messageData?: ArrayBuffer) => void>;
     //                        Type      Format
     toStreamerMessages: Map<string, ToStreamerMessage>;

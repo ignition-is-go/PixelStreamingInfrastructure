@@ -50,6 +50,8 @@ Options:
   --player_port <port>          Sets the listening port for player connections. (default: "80")
   --sfu_port <port>             Sets the listening port for SFU connections. (default: "8889")
   --max_players <number>        Sets the maximum number of subscribers per streamer. 0 = unlimited (default: "0")
+  --player_keepalive_timeout <milliseconds>
+                                Disconnect a player after this many milliseconds without a keepalive response. 0 = disabled (default: "30000")
   --serve                       Enables the webserver on player_port. (default: true)
   --http_root <path>            Sets the path for the webserver root. (default: "D:\\PixelStreamingInfrastructure\\SignallingWebServer\\www")
   --homepage <filename>         The default html file to serve on the web server. (default: "player.html")
@@ -117,3 +119,105 @@ The previous reference signalling server was called Cirrus (UE 5.4 and earlier).
 
 Differences of behaviour from the old Cirrus server are described [here](from_cirrus.md).
 
+
+## Expiring TURN credentials
+
+Set `TURN_CONFIG_FILE` to a server-only JSON file to replace the startup script's
+synthesized ICE configuration with explicit relay endpoints and fresh credentials
+for each player, streamer, or SFU connection:
+
+```json
+{
+    "urls": [
+        "turn:relay.example.com:3478?transport=udp",
+        "turn:relay.example.com:3478?transport=tcp",
+        "turns:relay.example.com:443?transport=tcp"
+    ],
+    "stunUrls": ["stun:stun.l.google.com:19302"],
+    "secretFile": "secret",
+    "ttlSeconds": 86400
+}
+```
+
+The optional `streamerUrls` array overrides `urls` for streamer connections only.
+Players and SFUs still receive `urls`. Omit `streamerUrls` to keep the same relay
+list for every connection. When present, the array must contain at least one TURN
+URL. Both lists use the same secret, credential lifetime, and STUN configuration.
+The server does not filter either list by hostname, port, or transport.
+
+`secretFile` resolves relative to the JSON file. Its contents must match coturn's
+`static-auth-secret` with `use-auth-secret` enabled. Keep both files outside the
+HTTP root, mount them read-only, and restrict the secret to the server user.
+The shared secret stays inside a closure; clients receive only expiring HMAC
+credentials following [coturn's TURN REST authentication](https://github.com/coturn/coturn/wiki/turnserver#turn-rest-api).
+Outgoing config bodies are omitted from protocol logs. The REST config endpoint
+does not issue or expose dynamic credentials.
+
+This mode replaces `peer_options` and `peer_options_file`; it preserves the default
+ICE policy, allowing direct connections. When unset, existing configuration
+behavior is unchanged. The Bash startup script suppresses its synthesized TURN
+options when `TURN_CONFIG_FILE` is set. Invalid configuration fails before the
+server opens listening sockets. Restart the signaller after changing the files.
+
+Choose the lifetime explicitly between 60 seconds and seven days. Each new
+signalling connection gets fresh credentials; an already connected client does
+not receive proactive credential refresh. Sessions that need a new TURN allocation
+after expiry must reconnect to signalling. This is not an unlimited-session refresh
+mechanism. Verify the intended session duration before enabling it.
+
+Build and test with the version in `NODE_VERSION`:
+
+```sh
+npm run build:cjs --workspace Common
+npm test --workspace Signalling
+npm test --workspace SignallingWebServer
+```
+
+For an isolated signaller configured with a real relay, install Playwright and its
+Chromium browser in your test environment, then run:
+
+```sh
+node SignallingWebServer/tests/validate_turn_relay.cjs ws://127.0.0.1:18080
+```
+
+The validator accepts only a local signaller URL. For each advertised TURN URL it
+connects two synthetic Chromium peers, forces relay on both ends, verifies ten
+data-channel echoes and the selected candidate types, then closes both peers.
+It does not subscribe to a streamer, change a server, or bypass TLS verification.
+`PLAYWRIGHT_MODULE` can point to an existing Playwright installation. This proves
+relay connectivity, not sustained video quality or the cause of established-stream
+freezes.
+
+For the expiry boundary, run a separate isolated signaller with `ttlSeconds: 60`:
+
+```sh
+node SignallingWebServer/tests/validate_turn_expiry.cjs ws://127.0.0.1:18080
+```
+
+This bounded UDP test keeps a synthetic pair alive through credential expiry,
+attempts an ICE restart, tries a new pair with expired credentials, and then
+obtains fresh credentials over WebSocket for another pair. It refuses credentials
+with more than 90 seconds remaining. Existing-pair survival does not establish
+long-term allocation refresh or automatic client renewal.
+
+## Private stream inventory
+
+The optional `--stream_inventory_port <port>` listener publishes typed JSON
+`StreamInventorySnapshot` messages over WebSocket. It is disabled by default and
+binds to `127.0.0.1` when enabled. Use `--stream_inventory_address <address>` to
+bind explicitly to a private monitoring interface. The listener is separate from
+the public player WebSocket and HTTP server; do not expose it through the public
+player ingress.
+
+An observer receives the complete current registration inventory on connection
+and after registration, removal, identity, availability or SFU upstream changes.
+There is no inventory polling, and observers do not create player sessions or
+subscribe to media. `availableToPlayers` uses the same registry projection as
+player `listStreamers`. It means the stream is offered for subscriptions, not that
+any viewer has verified audio or video reception. SFU upstream IDs come from the
+actual current subscription. No viewer counts or inferred producer hostnames are
+included. Stream IDs are scoped to this signalling server.
+
+Pulse Cluster can consume this private listener server-side and publish the
+result through its normal authenticated monitoring contract. Browser clients
+must not connect directly to this listener.

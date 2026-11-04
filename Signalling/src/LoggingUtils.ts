@@ -1,5 +1,5 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
-import { BaseMessage } from '@epicgames-ps/lib-pixelstreamingcommon-ue5.7';
+import { BaseMessage } from '@epicgames-ps/lib-pixelstreamingcommon-ue5.8';
 import { Logger } from './Logger';
 
 export interface IProtoLogObj {
@@ -44,7 +44,7 @@ export function logOutgoing(sender: IMessageLogger, message: BaseMessage): void 
         event: 'proto_message',
         direction: 'outgoing',
         sender: sender.getReadableIdentifier(),
-        protoMessage: message
+        protoMessage: message.type === 'config' ? { type: message.type } : message
     });
 }
 

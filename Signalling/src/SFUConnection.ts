@@ -1,4 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
+import type { IncomingMessage } from 'http';
+import type { SfuSignallingStateMessage } from '@ignition-is-go/pulse-pixelstreaming-protocol-types';
+import { randomUUID } from 'crypto';
 import WebSocket from 'ws';
 import {
     ITransport,
@@ -8,7 +11,7 @@ import {
     Messages,
     BaseMessage,
     EventEmitter
-} from '@epicgames-ps/lib-pixelstreamingcommon-ue5.7';
+} from '@epicgames-ps/lib-pixelstreamingcommon-ue5.8';
 import { IPlayer, IPlayerInfo } from './PlayerRegistry';
 import { IStreamer, IStreamerInfo } from './StreamerRegistry';
 import { Logger } from './Logger';
@@ -31,6 +34,7 @@ import { SignallingServer } from './SignallingServer';
  * streaming: True when the streamer is ready to accept subscriptions.
  */
 export class SFUConnection extends EventEmitter implements IPlayer, IStreamer, LogUtils.IMessageLogger {
+    readonly sessionId: string;
     // The player id related to this SFU connection.
     playerId: string;
     // The streamer id related to this SFU connection.
@@ -45,6 +49,8 @@ export class SFUConnection extends EventEmitter implements IPlayer, IStreamer, L
     subscribedStreamer: IStreamer | null;
     // A descriptive string describing the remote address of this connection.
     remoteAddress?: string;
+    // The HTTP upgrade request that opened this connection, if available.
+    request?: IncomingMessage;
     // The max number of subscribed players at a time. A value of 0 means there is no limit (this the default).
     maxSubscribers: number;
     // A list of all the current subscribed players.
@@ -54,26 +60,33 @@ export class SFUConnection extends EventEmitter implements IPlayer, IStreamer, L
     private layerPreferenceListener: (message: Messages.layerPreference) => void;
     private streamerIdChangeListener: (newId: string) => void;
     private streamerDisconnectedListener: () => void;
+    private observedUpstreams: Map<string, IStreamer>;
+    private connectionClosed: boolean;
 
     /**
      * Construct a new SFU connection.
      * @param server - The signalling server object that spawned this sfu.
      * @param ws - The websocket coupled to this sfu connection.
      * @param remoteAddress - The remote address of this connection. Only used as display.
+     * @param request - The HTTP upgrade request that opened this connection, if available.
      */
-    constructor(server: SignallingServer, ws: WebSocket, remoteAddress?: string) {
+    constructor(server: SignallingServer, ws: WebSocket, remoteAddress?: string, request?: IncomingMessage) {
         super();
 
         this.server = server;
+        this.sessionId = randomUUID();
         this.transport = new WebSocketTransportNJS(ws);
         this.protocol = new SignallingProtocol(this.transport);
         this.playerId = '';
         this.streamerId = '';
         this.streaming = false;
         this.remoteAddress = remoteAddress;
+        this.request = request;
         this.subscribedStreamer = null;
         this.maxSubscribers = 0;
         this.subscribers = new Set();
+        this.observedUpstreams = new Map();
+        this.connectionClosed = false;
 
         this.transport.on('error', this.onTransportError.bind(this));
         this.transport.on('close', this.onTransportClose.bind(this));
@@ -167,10 +180,48 @@ export class SFUConnection extends EventEmitter implements IPlayer, IStreamer, L
 
         this.protocol.on(Messages.offer.typeName, this.sendToPlayer.bind(this));
         this.protocol.on(Messages.answer.typeName, this.sendToStreamer.bind(this));
+        this.protocol.on(Messages.sfuHealth.typeName, (message: Messages.sfuHealth) => {
+            message.playerId = this.playerId;
+            message.sfuStreamerId = this.streamerId;
+            this.sendToStreamer(message);
+        });
         this.protocol.on(Messages.peerDataChannels.typeName, this.sendToPlayer.bind(this));
     }
 
+    /**
+     * Returns the streamer id this SFU is waiting on when a configured subscribe
+     * barrier is closed, or null when no barrier applies or it is open. The barrier
+     * opens once the required streamer is registered and — when it is itself an
+     * SFU — has subscribed to its own upstream (its playerConnected has then already
+     * been forwarded to the streamer, so the streamer registered it first).
+     */
+    private heldByBarrier(): string | null {
+        const barriers = this.server.config.sfuSubscribeBarriers;
+        if (!barriers) {
+            return null;
+        }
+        const requiredId = barriers[this.streamerId];
+        if (!requiredId) {
+            return null;
+        }
+        const required = this.server.streamerRegistry.find(requiredId);
+        if (!required) {
+            return requiredId;
+        }
+        if (required instanceof SFUConnection && !required.subscribedStreamer) {
+            return requiredId;
+        }
+        return null;
+    }
+
     private subscribe(streamerId: string) {
+        const held = this.heldByBarrier();
+        if (held) {
+            Logger.warn(
+                `subscribe: SFU ${this.streamerId} (${this.playerId}) is held by a subscribe barrier until ${held} has subscribed upstream; refusing subscription to ${streamerId}`
+            );
+            return;
+        }
         const streamer = this.server.streamerRegistry.find(streamerId);
         if (!streamer) {
             Logger.error(
@@ -179,7 +230,20 @@ export class SFUConnection extends EventEmitter implements IPlayer, IStreamer, L
             return;
         }
 
+        if (this.subscribedStreamer === streamer) {
+            this.sendSignallingState(streamer, 'connected', 'active', 'SFU session subscription active');
+            return;
+        }
+        if (this.subscribedStreamer) {
+            this.unsubscribe('SFU session rebound to another streamer');
+        }
+
         this.subscribedStreamer = streamer;
+        this.server.streamerRegistry.notifyChanged();
+        this.observedUpstreams.set(streamer.streamerId, streamer);
+        // Register as a subscriber of the upstream streamer so it will forward signalling messages
+        // back to this SFU (the streamer's forwardMessage only sends to subscribed players).
+        this.subscribedStreamer.subscribers.add(this.playerId);
         this.subscribedStreamer.on('layer_preference', this.layerPreferenceListener);
         this.subscribedStreamer.on('id_changed', this.streamerIdChangeListener);
         this.subscribedStreamer.on('disconnect', this.streamerDisconnectedListener);
@@ -187,25 +251,87 @@ export class SFUConnection extends EventEmitter implements IPlayer, IStreamer, L
         const connectedMessage = MessageHelpers.createMessage(Messages.playerConnected, {
             playerId: this.playerId,
             dataChannel: true,
-            sfu: true
+            sfu: true,
+            sfuStreamerId: this.streamerId
         });
         this.sendToStreamer(connectedMessage);
+        this.sendSignallingState(streamer, 'connected', 'active', 'SFU session subscription active');
     }
 
-    private unsubscribe() {
+    private unsubscribe(
+        detail = 'SFU session unsubscribed',
+        connectionState: 'connected' | 'disconnected' = 'connected'
+    ): IStreamer | null {
         if (!this.subscribedStreamer) {
-            return;
+            return null;
         }
+
+        const upstream = this.subscribedStreamer;
+        this.sendSignallingState(upstream, connectionState, 'detached', detail);
 
         const disconnectedMessage = MessageHelpers.createMessage(Messages.playerDisconnected, {
             playerId: this.playerId
         });
         this.sendToStreamer(disconnectedMessage);
 
+        this.subscribedStreamer.subscribers.delete(this.playerId);
         this.subscribedStreamer.off('layer_preference', this.layerPreferenceListener);
         this.subscribedStreamer.off('id_changed', this.streamerIdChangeListener);
         this.subscribedStreamer.off('disconnect', this.streamerDisconnectedListener);
         this.subscribedStreamer = null;
+        this.server.streamerRegistry.notifyChanged();
+
+        this.kickDependents();
+        return upstream;
+    }
+
+    private sendSignallingState(
+        upstream: IStreamer,
+        connectionState: Exclude<SfuSignallingStateMessage['connectionState'], 'unknown'>,
+        subscriptionState: Exclude<SfuSignallingStateMessage['subscriptionState'], 'unknown'>,
+        detail: string
+    ): void {
+        upstream.protocol.sendMessage(
+            MessageHelpers.createMessage(Messages.sfuSignallingState, {
+                sessionId: this.sessionId,
+                sfuStreamerId: this.streamerId,
+                upstreamStreamerId: upstream.streamerId,
+                connectionState,
+                subscriptionState,
+                detail,
+                playerId: this.playerId
+            } satisfies SfuSignallingStateMessage)
+        );
+    }
+
+    /**
+     * When this SFU loses its upstream subscription and another SFU's subscribe
+     * barrier names it as required, that dependent must not stay subscribed: it
+     * would remain attached while this SFU rejoins later, inverting the join order
+     * the barrier exists to guarantee. Kick each subscribed dependent with a
+     * streamerDisconnected message — the same signal it handles when the streamer
+     * itself goes away — so it re-enters discovery and is held by the barrier
+     * until this SFU has resubscribed. Guarded against cycles: a dependent that
+     * is already unsubscribed is skipped.
+     */
+    private kickDependents(): void {
+        const barriers = this.server.config.sfuSubscribeBarriers;
+        if (!barriers || !this.streamerId) {
+            return;
+        }
+        for (const [dependentId, requiredId] of Object.entries(barriers)) {
+            if (requiredId !== this.streamerId || dependentId === this.streamerId) {
+                continue;
+            }
+            const dependent = this.server.streamerRegistry.find(dependentId);
+            if (dependent instanceof SFUConnection && dependent.subscribedStreamer) {
+                Logger.warn(
+                    `SFU ${this.streamerId} lost its upstream subscription; kicking dependent SFU ${dependentId} so it re-enters through the subscribe barrier.`
+                );
+                dependent.unsubscribe();
+                dependent.sendMessage(MessageHelpers.createMessage(Messages.streamerDisconnected));
+            }
+        }
     }
 
     private sendToStreamer(message: BaseMessage): void {
@@ -232,6 +358,14 @@ export class SFUConnection extends EventEmitter implements IPlayer, IStreamer, L
             );
             return;
         }
+        if (!this.subscribers.has(message.playerId)) {
+            // Only send to players subscribed to this SFU, otherwise the SFU could target any player
+            // on the server via the global player registry (cross-tenant signalling).
+            Logger.error(
+                `SFU ${this.streamerId} tried to send a message to player ${message.playerId} which is not subscribed to it. Ignored.`
+            );
+            return;
+        }
         const player = this.server.playerRegistry.get(message.playerId);
         if (player) {
             delete message.playerId;
@@ -243,7 +377,21 @@ export class SFUConnection extends EventEmitter implements IPlayer, IStreamer, L
     }
 
     private disconnect() {
-        this.unsubscribe();
+        if (this.connectionClosed) {
+            return;
+        }
+        this.connectionClosed = true;
+        const activeUpstream = this.unsubscribe('SFU signalling socket disconnected', 'disconnected');
+        for (const upstream of this.observedUpstreams.values()) {
+            if (upstream !== activeUpstream) {
+                this.sendSignallingState(
+                    upstream,
+                    'disconnected',
+                    'detached',
+                    'SFU signalling socket disconnected'
+                );
+            }
+        }
         this.protocol.disconnect();
         this.emit('disconnect');
     }
@@ -258,9 +406,10 @@ export class SFUConnection extends EventEmitter implements IPlayer, IStreamer, L
     }
 
     private onStreamerDisconnected(): void {
-        this.unsubscribe();
+        this.unsubscribe('Upstream streamer signalling socket disconnected');
         this.sendMessage(MessageHelpers.createMessage(Messages.streamerDisconnected));
         this.streaming = false;
+        this.server.streamerRegistry.notifyChanged();
         this.emit('disconnect');
     }
 
@@ -282,8 +431,18 @@ export class SFUConnection extends EventEmitter implements IPlayer, IStreamer, L
     }
 
     private onListStreamers(_message: Messages.listStreamers): void {
+        // An SFU held by a subscribe barrier is shown an empty list rather than a
+        // filtered one: SFUs without a configured subscription take the first listed
+        // id, so any visible streamer could be subscribed to early. The SFU's
+        // discovery loop keeps polling, and sees the real list once the barrier opens.
+        const held = this.heldByBarrier();
+        if (held) {
+            Logger.info(
+                `SFU ${this.streamerId} (${this.playerId}) is held by a subscribe barrier until ${held} has subscribed upstream; sending an empty streamer list.`
+            );
+        }
         const listMessage = MessageHelpers.createMessage(Messages.streamerList, {
-            ids: this.server.streamerRegistry.streamers.map((streamer) => streamer.streamerId)
+            ids: held ? [] : this.server.streamerRegistry.streamers.map((streamer) => streamer.streamerId)
         });
         this.sendMessage(listMessage);
     }
@@ -295,14 +454,17 @@ export class SFUConnection extends EventEmitter implements IPlayer, IStreamer, L
 
     private onEndpointId(_message: Messages.endpointId): void {
         this.streaming = true;
+        this.server.streamerRegistry.notifyChanged();
     }
 
     private onStartStreaming(_message: Messages.startStreaming): void {
         this.streaming = true;
+        this.server.streamerRegistry.notifyChanged();
     }
 
     private onStopStreaming(_message: Messages.stopStreaming): void {
         this.streaming = false;
+        this.server.streamerRegistry.notifyChanged();
         this.emit('disconnect');
     }
 

@@ -6,6 +6,7 @@ These versions are currently being supported with security updates.
 
 | Version | Supported          |
 | ------- | ------------------ |
+| 5.8     | :white_check_mark: |
 | 5.7     | :white_check_mark: |
 | 5.6     | :white_check_mark: |
 | 5.5     | :white_check_mark: |
@@ -15,4 +16,4 @@ These versions are currently being supported with security updates.
 
 ## Reporting a Vulnerability
 
-If you find a vulnerability please open an advisory here: https://github.com/EpicGamesExt/PixelStreamingInfrastructure/security/advisories/new
+If you find a vulnerability please open an advisory here: https://github.com/EpicGames/PixelStreamingInfrastructure/security/advisories/new

@@ -1,11 +1,22 @@
 // Parse passed arguments
 let passedPublicIP = null;
+let passedWorkerCount = null;
 for(let arg of process.argv){
   if(arg && arg.startsWith("--PublicIP=")){
     let splitArr = arg.split("=");
     if(splitArr.length === 2){
       passedPublicIP = splitArr[1];
       console.log("--PublicIP=" + passedPublicIP);
+    }
+  }
+  if(arg && arg.startsWith("--workerCount=")){
+    let splitArr = arg.split("=");
+    if(splitArr.length === 2){
+      passedWorkerCount = Number(splitArr[1]);
+      if(!Number.isInteger(passedWorkerCount) || passedWorkerCount < 1){
+        throw new TypeError("--workerCount must be a positive integer");
+      }
+      console.log("--workerCount=" + passedWorkerCount);
     }
   }
 }
@@ -17,16 +28,34 @@ const config = {
   // The ID for this SFU to use. This will show up as a streamer ID on the signalling server
   SFUId: "SFU",
 
+  // Status sampling is independent of media forwarding.
+  // Enable only when the subscribed upstream consumes sfuHealth reports.
+  healthReportingEnabled: false,
+  healthIntervalMs: 1000,
+  // A dashboard must stop treating a report as current after three missed samples.
+  healthMaxAgeMs: 3000,
+
   // The ID of the streamer to subscribe to. If you leave this blank it will subscribe to the first streamer it sees.
   subscribeStreamerId: "DefaultStreamer",
 
   // Delay between list requests when looking for a specifc streamer.
   retrySubscribeDelaySecs: 10,
 
+  // Detect a silent half-open signalling socket and reconnect with bounded backoff.
+  signallingHeartbeatIntervalSecs: 10,
+  signallingHeartbeatTimeoutSecs: 30,
+  signallingConnectTimeoutSecs: 10,
+  signallingReconnectMinDelaySecs: 2,
+  signallingReconnectMaxDelaySecs: 30,
+
+  // Allow a brief ICE interruption, but rebuild an upstream generation that stays dead.
+  streamerDisconnectGraceSecs: 5,
+
   // Enable SVC support
   enableSVC: true,
 
   mediasoup: {
+    workerCount: passedWorkerCount ?? 1,
     worker: {
       rtcMinPort: 40000,
       rtcMaxPort: 49999,

@@ -9,3 +9,5 @@ export * from './StreamerConnection';
 export * from './StreamerRegistry';
 export * from './WebServer';
 // keep Utils internal for now
+
+export * from './StreamInventoryServer';

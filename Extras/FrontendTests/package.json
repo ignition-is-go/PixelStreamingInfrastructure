@@ -6,6 +6,8 @@
     "private": true,
     "scripts": {
         "test": "npx playwright test",
+        "test:h264": "REQUIRE_H264=1 npx playwright test --config h264-compat.config.ts --project chromium --project webkit && npx playwright test --config h264-compat.config.ts --project firefox",
+        "test:h264:firefox-release": "node tests/h264-firefox-release.mjs",
         "build": "",
         "clean": "",
         "lint": ""
@@ -16,11 +18,12 @@
     "devDependencies": {
         "@playwright/test": "^1.49.1",
         "@types/node": "^22.14.0",
-        "@types/uuid": "^9.0.8"
+        "@types/uuid": "^9.0.8",
+        "selenium-webdriver": "^4.51.0"
     },
     "dependencies": {
         "@epicgames-ps/js-streamer": "^0.0.5",
-        "@epicgames-ps/lib-pixelstreamingfrontend-ue5.7": "*",
+        "@epicgames-ps/lib-pixelstreamingfrontend-ue5.8": "*",
         "dotenv": "^16.4.5",
         "node-fetch": "^2.7.0",
         "uuid": "^14.0.0"

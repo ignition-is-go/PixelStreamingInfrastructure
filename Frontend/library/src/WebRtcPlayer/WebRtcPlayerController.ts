@@ -9,7 +9,7 @@ import {
     MessageHelpers,
     BaseMessage,
     KeepaliveMonitor
-} from '@epicgames-ps/lib-pixelstreamingcommon-ue5.7';
+} from '@epicgames-ps/lib-pixelstreamingcommon-ue5.8';
 import { StreamController } from '../VideoPlayer/StreamController';
 import { FreezeFrameController } from '../FreezeFrame/FreezeFrameController';
 import { AFKController } from '../AFK/AFKController';
@@ -1807,6 +1807,14 @@ export class WebRtcPlayerController {
     sendIframeRequest(): void {
         Logger.Info('----   Sending Request for an IFrame  ----');
         this.streamMessageController.toStreamerHandlers.get('IFrameRequest')();
+    }
+
+    /**
+     * Checks whether the to-streamer (send) data channel is open and ready to send.
+     * @returns true if the data channel exists and its readyState is 'open'.
+     */
+    isDataChannelOpen(): boolean {
+        return this.sendrecvDataChannelController?.dataChannel?.readyState === 'open';
     }
 
     /**

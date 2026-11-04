@@ -1,4 +1,5 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
+import type { IncomingMessage } from 'http';
 import WebSocket from 'ws';
 import {
     ITransport,
@@ -8,7 +9,7 @@ import {
     Messages,
     EventEmitter,
     MessageHelpers
-} from '@epicgames-ps/lib-pixelstreamingcommon-ue5.7';
+} from '@epicgames-ps/lib-pixelstreamingcommon-ue5.8';
 import { IStreamer, IStreamerInfo } from './StreamerRegistry';
 import { stringify } from './Utils';
 import { Logger } from './Logger';
@@ -38,6 +39,8 @@ export class StreamerConnection extends EventEmitter implements IStreamer, LogUt
     streaming: boolean;
     // A descriptive string describing the remote address of this connection.
     remoteAddress?: string;
+    // The HTTP upgrade request that opened this connection, if available.
+    request?: IncomingMessage;
     // The max number of subscribed players at a time.
     maxSubscribers: number;
     // A list of all the current subscribed players.
@@ -51,8 +54,9 @@ export class StreamerConnection extends EventEmitter implements IStreamer, LogUt
      * @param server - The signalling server object that spawned this streamer.
      * @param ws - The websocket coupled to this streamer connection.
      * @param remoteAddress - The remote address of this connection. Only used as display.
+     * @param request - The HTTP upgrade request that opened this connection, if available.
      */
-    constructor(server: SignallingServer, ws: WebSocket, remoteAddress?: string) {
+    constructor(server: SignallingServer, ws: WebSocket, remoteAddress?: string, request?: IncomingMessage) {
         super();
 
         this.server = server;
@@ -61,6 +65,7 @@ export class StreamerConnection extends EventEmitter implements IStreamer, LogUt
         this.protocol = new SignallingProtocol(this.transport);
         this.streaming = false;
         this.remoteAddress = remoteAddress;
+        this.request = request;
         this.maxSubscribers = 0;
         this.subscribers = new Set();
 
@@ -133,6 +138,13 @@ export class StreamerConnection extends EventEmitter implements IStreamer, LogUt
     private forwardMessage(message: BaseMessage): void {
         if (!message.playerId) {
             Logger.warn(`No playerId specified, cannot forward message: ${stringify(message)}`);
+        } else if (!this.subscribers.has(message.playerId)) {
+            // Only forward to players that are actually subscribed to this streamer. Without this
+            // check a streamer could target any player on the server (resolved via the global player
+            // registry), allowing cross-tenant signalling on a shared signalling server.
+            Logger.warn(
+                `Streamer ${this.streamerId} tried to forward a message to player ${message.playerId} which is not subscribed to it. Ignoring.`
+            );
         } else {
             const player = this.server.playerRegistry.get(message.playerId);
             if (player) {
@@ -153,10 +165,19 @@ export class StreamerConnection extends EventEmitter implements IStreamer, LogUt
 
     private onEndpointId(_message: Messages.endpointId): void {
         this.streaming = true; // we're ready to stream when we id ourselves
+        this.server.streamerRegistry.notifyChanged();
     }
 
     private onDisconnectPlayerRequest(message: Messages.disconnectPlayer): void {
         if (message.playerId) {
+            if (!this.subscribers.has(message.playerId)) {
+                // A streamer may only disconnect its own subscribed players. Otherwise any streamer
+                // could forcibly close arbitrary player connections on a shared signalling server.
+                Logger.warn(
+                    `Streamer ${this.streamerId} tried to disconnect player ${message.playerId} which is not subscribed to it. Ignoring.`
+                );
+                return;
+            }
             const player = this.server.playerRegistry.get(message.playerId);
             if (player) {
                 player.protocol.disconnect(1011, message.reason);

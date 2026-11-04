@@ -15,13 +15,21 @@
         "start": "run-script-os",
         "start:windows": "platform_scripts\\cmd\\node\\node.exe sfu_server.js",
         "start:default": "if [ `id -u` -eq 0 ]\nthen\n export process=\"./platform_scripts/bash/node/bin/node sfu_server.js\"\nelse\n export process=\"sudo ./platform_scripts/bash/node/bin/node sfu_server.js\"\nfi\n$process ",
-        "lint": ""
+        "test": "npm run check:health && node --test tests/*.test.js",
+        "probe-registration": "node registration_probe.js",
+        "lint": "",
+        "check:health": "tsc --project tsconfig.health.json"
     },
     "dependencies": {
         "mediasoup": "^3.15.5",
         "@epicgames-ps/mediasoup-sdp-bridge": "^1.0.0",
         "minimist": "^1.2.8",
         "run-script-os": "^1.1.6",
-        "ws": "^7.5.10"
+        "ws": "^7.5.11"
+    },
+    "devDependencies": {
+        "typescript": "^5.7.3",
+        "@types/node": "^22.14.0",
+        "@ignition-is-go/pulse-pixelstreaming-protocol-types": "file:../vendor/pulse-pixelstreaming-protocol-types.tgz"
     }
 }

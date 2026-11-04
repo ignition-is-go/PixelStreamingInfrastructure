@@ -9,7 +9,7 @@ import {
     InitLogging,
     Logger,
     IWebServerConfig
-} from '@epicgames-ps/lib-pixelstreamingsignalling-ue5.7';
+} from '@epicgames-ps/lib-pixelstreamingsignalling-ue5.8';
 import { beautify, IProgramOptions } from './Utils';
 import { initInputHandler } from './InputHandler';
 import { Command, Option } from 'commander';
@@ -20,6 +20,7 @@ import playerByIdHandler from './paths/players/{playerId}';
 import statusHandler from './paths/status';
 import streamersHandler from './paths/streamers';
 import streamerByIdHandler from './paths/streamers/{streamerId}';
+import { loadTurnPeerOptionsProviders } from './TurnCredentials';
 
 // eslint-disable-next-line  @typescript-eslint/no-unsafe-assignment
 const pjson = require('../package.json');
@@ -104,9 +105,29 @@ program
         config_file.sfu_port || '8889'
     )
     .option(
+        '--stream_inventory_port <port>',
+        'Private stream inventory WebSocket port. Disabled when omitted.',
+        config_file.stream_inventory_port
+    )
+    .option(
+        '--stream_inventory_address <address>',
+        'Bind address for the private stream inventory WebSocket.',
+        config_file.stream_inventory_address || '127.0.0.1'
+    )
+    .option(
         '--max_players <number>',
         'Sets the maximum number of subscribers per streamer. 0 = unlimited',
         config_file.max_players || '0'
+    )
+    .option(
+        '--sfu_subscribe_barriers <json-string>',
+        'JSON object mapping a dependent SFU streamer id to a required streamer id. The dependent SFU is sent an empty streamer list (and refused subscriptions) until the required streamer is registered and, when it is itself an SFU, subscribed to its own upstream — enforcing a deterministic SFU join order at the streamer. Also settable via the SFU_SUBSCRIBE_BARRIERS environment variable.',
+        config_file.sfu_subscribe_barriers || process.env.SFU_SUBSCRIBE_BARRIERS || ''
+    )
+    .option(
+        '--player_keepalive_timeout <milliseconds>',
+        'Disconnect a player after this many milliseconds without a keepalive response. 0 = disabled',
+        config_file.player_keepalive_timeout || '30000'
     )
     .option('--serve', 'Enables the webserver on player_port.', config_file.serve || false)
     .option(
@@ -270,8 +291,35 @@ const serverOpts: IServerConfig = {
     playerPort: options.player_port,
     sfuPort: options.sfu_port,
     peerOptions: options.peer_options,
-    maxSubscribers: options.max_players
+    maxSubscribers: options.max_players,
+    playerKeepaliveTimeout: Number(options.player_keepalive_timeout)
 };
+
+if (options.stream_inventory_port !== undefined) {
+    const port = Number(options.stream_inventory_port);
+    if (!Number.isInteger(port) || port < 1 || port > 65535) {
+        throw new Error('stream_inventory_port must be an integer from 1 to 65535');
+    }
+    serverOpts.streamInventory = { host: options.stream_inventory_address, port };
+}
+
+if (process.env.TURN_CONFIG_FILE) {
+    const peerOptionsProviders = loadTurnPeerOptionsProviders(process.env.TURN_CONFIG_FILE);
+    serverOpts.peerOptionsProvider = peerOptionsProviders.peerOptionsProvider;
+    serverOpts.streamerPeerOptionsProvider = peerOptionsProviders.streamerPeerOptionsProvider;
+    serverOpts.peerOptions = {};
+}
+
+if (options.sfu_subscribe_barriers) {
+    try {
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+        serverOpts.sfuSubscribeBarriers = JSON.parse(options.sfu_subscribe_barriers);
+    } catch {
+        throw Error(
+            `--sfu_subscribe_barriers is not valid JSON: ${JSON.stringify(options.sfu_subscribe_barriers)}`
+        );
+    }
+}
 
 const shouldServerStart = options.serve || options.rest_api;
 if (shouldServerStart) {
