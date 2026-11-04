@@ -73,6 +73,19 @@ jobs:
             - name: Configure protected production name resolution
               run: printf '%s\n' "$PIXELSTREAM_PRODUCTION_HOSTS" | sudo tee -a /etc/hosts >/dev/null
 
+            - name: Require a production viewer document
+              run: |
+                  response_file="$(mktemp)"
+                  if ! curl --fail --silent --show-error --output "$response_file" \
+                      "$PIXELSTREAM_PRODUCTION_VIEWER_URL" 2>/dev/null; then
+                      echo 'Protected production viewer HTTP preflight failed.' >&2
+                      exit 1
+                  fi
+                  if ! test -s "$response_file"; then
+                      echo 'Protected production viewer returned an empty document.' >&2
+                      exit 1
+                  fi
+
             - name: Decode production H264 video and audio
               working-directory: Extras/FrontendTests
               run: npm run test:h264:production
