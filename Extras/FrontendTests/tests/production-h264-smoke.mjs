@@ -153,6 +153,15 @@ try {
         );
     }
 
+    phase = 'media playback';
+    const videos = await driver.findElements(By.css('video'));
+    for (const video of videos) {
+        if ((await video.isDisplayed()) && (await driver.executeScript((element) => element.paused, video))) {
+            await video.click();
+            break;
+        }
+    }
+
     phase = 'frame validation';
     const frames = await driver.executeAsyncScript(
         (timeout, done) => {
@@ -207,8 +216,8 @@ try {
             `audio tracks ${media.audioTracks}\n`
     );
 } catch (error) {
-    const message =
-        error instanceof SmokeFailure ? error.message : `${phase} failed before decode validation`;
+    const errorKind = error instanceof Error ? error.name : 'UnknownError';
+    const message = error instanceof SmokeFailure ? error.message : `${phase} failed (${errorKind})`;
     process.stderr.write(`${browserName}: ${message}\n`);
     process.exitCode = 1;
 } finally {
