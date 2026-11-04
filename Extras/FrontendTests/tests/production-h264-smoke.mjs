@@ -39,7 +39,7 @@ switch (browserName) {
             .forBrowser('chrome')
             .setChromeOptions(
                 new chrome.Options()
-                    .setPageLoadStrategy('eager')
+                    .setPageLoadStrategy('none')
                     .addArguments('--headless=new')
                     .addArguments('--no-sandbox')
                     .addArguments('--disable-dev-shm-usage')
@@ -49,12 +49,12 @@ switch (browserName) {
     case 'firefox':
         builder = builder
             .forBrowser('firefox')
-            .setFirefoxOptions(new firefox.Options().setPageLoadStrategy('eager').addArguments('-headless'));
+            .setFirefoxOptions(new firefox.Options().setPageLoadStrategy('none').addArguments('-headless'));
         break;
     case 'safari':
         builder = builder
             .forBrowser('safari')
-            .setSafariOptions(new safari.Options().setPageLoadStrategy('eager'));
+            .setSafariOptions(new safari.Options().setPageLoadStrategy('none'));
         break;
     default: {
         const exhaustive = browserName;
