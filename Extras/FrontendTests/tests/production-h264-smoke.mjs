@@ -63,12 +63,15 @@ switch (browserName) {
 }
 
 let driver;
+let phase = 'driver startup';
 try {
     driver = await builder.build();
     await driver.manage().setTimeouts({ pageLoad: 10000, script: timeoutMs + 10000 });
+    phase = 'viewer navigation';
     await driver.get('about:blank');
     await driver.executeScript((url) => window.location.assign(url), viewerUrl);
 
+    phase = 'media discovery';
     const deadline = Date.now() + timeoutMs;
     const overlayClicks = { connect: 0, play: 0 };
     let navigationReached = false;
@@ -150,6 +153,7 @@ try {
         );
     }
 
+    phase = 'frame validation';
     const frames = await driver.executeAsyncScript(
         (timeout, done) => {
             const video = [...document.querySelectorAll('video')].find(
@@ -160,9 +164,11 @@ try {
                 return;
             }
 
+            const frameDeadline = Date.now() + timeout;
             const nextFrame = () =>
                 new Promise((resolve, reject) => {
-                    const timer = setTimeout(() => reject(new Error('decoded frame timed out')), timeout);
+                    const remaining = Math.max(1, frameDeadline - Date.now());
+                    const timer = setTimeout(() => reject(new Error('decoded frame timed out')), remaining);
                     video.requestVideoFrameCallback((_now, metadata) => {
                         clearTimeout(timer);
                         resolve({ mediaTime: metadata.mediaTime, presentedFrames: metadata.presentedFrames });
@@ -171,7 +177,13 @@ try {
 
             (async () => {
                 const first = await nextFrame();
-                const second = await nextFrame();
+                let second = first;
+                while (
+                    Date.now() < frameDeadline &&
+                    (second.presentedFrames <= first.presentedFrames || second.mediaTime <= first.mediaTime)
+                ) {
+                    second = await nextFrame();
+                }
                 done({ kind: 'success', first, second });
             })().catch((error) =>
                 done({ kind: 'failure', message: error instanceof Error ? error.message : String(error) })
@@ -196,7 +208,7 @@ try {
     );
 } catch (error) {
     const message =
-        error instanceof SmokeFailure ? error.message : 'browser automation failed before decode validation';
+        error instanceof SmokeFailure ? error.message : `${phase} failed before decode validation`;
     process.stderr.write(`${browserName}: ${message}\n`);
     process.exitCode = 1;
 } finally {
