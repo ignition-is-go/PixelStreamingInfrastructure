@@ -66,16 +66,15 @@ let driver;
 try {
     driver = await builder.build();
     await driver.manage().setTimeouts({ pageLoad: 10000, script: timeoutMs + 10000 });
-    try {
-        await driver.get(viewerUrl);
-    } catch (error) {
-        if (!(error instanceof Error) || error.name !== 'TimeoutError') throw error;
-    }
+    await driver.get('about:blank');
+    await driver.executeScript((url) => window.location.assign(url), viewerUrl);
 
     const deadline = Date.now() + timeoutMs;
     const overlayClicks = { connect: 0, play: 0 };
+    let navigationReached = false;
     let media;
     while (Date.now() < deadline) {
+        navigationReached = (await driver.getCurrentUrl()) !== 'about:blank';
         for (const [kind, selector] of [
             ['connect', '#connectOverlay'],
             ['play', '#playOverlay']
@@ -134,6 +133,7 @@ try {
         };
         throw new SmokeFailure(
             'no decoded production video appeared before the deadline; ' +
+                `viewer navigation ${navigationReached ? 'reached' : 'not reached'}, ` +
                 `document ${state.readyState}, body children ${state.bodyChildren}, scripts ${state.scripts}, ` +
                 `video elements ${state.videoElements}, attached streams ${state.attachedStreams}, ` +
                 `live video tracks ${state.liveVideoTracks}, muted video tracks ${state.mutedVideoTracks}, ` +
