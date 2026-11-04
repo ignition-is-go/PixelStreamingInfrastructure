@@ -6,6 +6,7 @@
     "private": true,
     "scripts": {
         "test": "npx playwright test",
+        "test:h264": "npx playwright test --config h264-compat.config.ts",
         "build": "",
         "clean": "",
         "lint": ""
