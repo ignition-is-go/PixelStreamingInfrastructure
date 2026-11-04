@@ -10,6 +10,7 @@ Configuration is handled through the single config.js file.
 |-|-|-|-|
 | signallingURL | String | 'http://localhost:8889' | The URL pointing to the signalling server we want to connect to. |
 | SFUId | String | 'SFU' | The name this peer will be given that will then be displayed in the streamer list. Peers wishing to receive from this SFU should subscribe to this ID. |
+| feed | Object | omitted | Optional discovery advertisement: `{ "id": "logical programme ID", "kind": "program", "route": "edge" }`. Kind is `program` or `preview`; route is `local` or `edge`. Local and edge instances of one feed advertise the same ID. This metadata does not change media routing. |
 | subscribeStreamerId | String | 'DefaultStreamer' | This is the name of the streamer that this SFU should subscribe to and re-stream. |
 | retrySubscribeDelaySecs | Number | 10 | If subscribing to the given streamer fails, wait this many seconds before trying again. |
 | mediasoup | Object | | Mediasoup-related configuration options. See below. |
