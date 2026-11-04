@@ -1,4 +1,4 @@
-import { Builder } from 'selenium-webdriver';
+import { Builder, By } from 'selenium-webdriver';
 import chrome from 'selenium-webdriver/chrome.js';
 import firefox from 'selenium-webdriver/firefox.js';
 import safari from 'selenium-webdriver/safari.js';
@@ -68,29 +68,64 @@ try {
     await driver.manage().setTimeouts({ pageLoad: timeoutMs, script: timeoutMs + 10000 });
     await driver.get(viewerUrl);
 
-    const result = await driver.executeAsyncScript(
-        (width, height, timeout, done) => {
-            const deadline = Date.now() + timeout;
+    const deadline = Date.now() + timeoutMs;
+    let media;
+    while (Date.now() < deadline) {
+        for (const selector of ['#connectOverlay', '#playOverlay']) {
+            const overlays = await driver.findElements(By.css(selector));
+            for (const overlay of overlays) {
+                if (await overlay.isDisplayed()) await overlay.click();
+            }
+        }
 
-            const fail = (message) => done({ kind: 'failure', message });
-            const wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
-            const findVideo = () =>
-                [...document.querySelectorAll('video')].find(
-                    (video) => video.srcObject && video.videoWidth > 0 && video.videoHeight > 0
-                );
-            const audioTrackCount = () =>
-                [...document.querySelectorAll('audio, video')]
-                    .map((element) => element.srcObject)
-                    .filter((stream) => stream instanceof MediaStream)
+        media = await driver.executeScript(() => {
+            const elements = [...document.querySelectorAll('audio, video')];
+            const streams = elements
+                .map((element) => element.srcObject)
+                .filter((stream) => stream instanceof MediaStream);
+            const video = elements.find(
+                (element) =>
+                    element instanceof HTMLVideoElement &&
+                    element.srcObject instanceof MediaStream &&
+                    element.videoWidth > 0 &&
+                    element.videoHeight > 0
+            );
+            return {
+                width: video?.videoWidth ?? 0,
+                height: video?.videoHeight ?? 0,
+                audioTracks: streams
                     .flatMap((stream) => stream.getAudioTracks())
-                    .filter((track) => track.readyState === 'live').length;
+                    .filter((track) => track.readyState === 'live').length
+            };
+        });
+        if (media.width > 0 && media.height > 0 && media.audioTracks > 0) break;
+        await driver.sleep(250);
+    }
 
-            const nextFrame = (video) =>
+    if (!media || media.width === 0 || media.height === 0) {
+        throw new SmokeFailure('no decoded production video appeared before the deadline');
+    }
+    if (media.audioTracks === 0) {
+        throw new SmokeFailure('no live production audio track appeared before the deadline');
+    }
+    if (media.width !== expectedWidth || media.height !== expectedHeight) {
+        throw new SmokeFailure(
+            `expected ${expectedWidth}x${expectedHeight}, received ${media.width}x${media.height}`
+        );
+    }
+
+    const frames = await driver.executeAsyncScript(
+        (timeout, done) => {
+            const video = [...document.querySelectorAll('video')].find(
+                (element) => element.srcObject && element.videoWidth > 0 && element.videoHeight > 0
+            );
+            if (!video || !('requestVideoFrameCallback' in video)) {
+                done({ kind: 'failure', message: 'requestVideoFrameCallback is unavailable' });
+                return;
+            }
+
+            const nextFrame = () =>
                 new Promise((resolve, reject) => {
-                    if (!('requestVideoFrameCallback' in video)) {
-                        reject(new Error('requestVideoFrameCallback is unavailable'));
-                        return;
-                    }
                     const timer = setTimeout(() => reject(new Error('decoded frame timed out')), timeout);
                     video.requestVideoFrameCallback((_now, metadata) => {
                         clearTimeout(timer);
@@ -99,48 +134,29 @@ try {
                 });
 
             (async () => {
-                let video;
-                while (Date.now() < deadline) {
-                    video = findVideo();
-                    if (video && audioTrackCount() > 0) break;
-                    await wait(250);
-                }
-                if (!video) return fail('no decoded production video appeared before the deadline');
-                if (audioTrackCount() === 0)
-                    return fail('no live production audio track appeared before the deadline');
-                if (video.videoWidth !== width || video.videoHeight !== height) {
-                    return fail(
-                        `expected ${width}x${height}, received ${video.videoWidth}x${video.videoHeight}`
-                    );
-                }
-
-                await video.play();
-                const first = await nextFrame(video);
-                const second = await nextFrame(video);
-                if (second.presentedFrames <= first.presentedFrames || second.mediaTime <= first.mediaTime) {
-                    return fail('decoded video frames did not advance');
-                }
-
-                done({
-                    kind: 'success',
-                    width: video.videoWidth,
-                    height: video.videoHeight,
-                    frameDelta: second.presentedFrames - first.presentedFrames,
-                    mediaTimeDelta: second.mediaTime - first.mediaTime,
-                    audioTracks: audioTrackCount()
-                });
-            })().catch((error) => fail(error instanceof Error ? error.message : String(error)));
+                const first = await nextFrame();
+                const second = await nextFrame();
+                done({ kind: 'success', first, second });
+            })().catch((error) =>
+                done({ kind: 'failure', message: error instanceof Error ? error.message : String(error) })
+            );
         },
-        expectedWidth,
-        expectedHeight,
-        timeoutMs
+        Math.max(1000, deadline - Date.now())
     );
 
-    if (result.kind !== 'success') throw new SmokeFailure(result.message);
+    if (frames.kind !== 'success') throw new SmokeFailure(frames.message);
+    if (
+        frames.second.presentedFrames <= frames.first.presentedFrames ||
+        frames.second.mediaTime <= frames.first.mediaTime
+    ) {
+        throw new SmokeFailure('decoded video frames did not advance');
+    }
+
     process.stdout.write(
-        `${browserName}: decoded ${result.width}x${result.height}, ` +
-            `frames +${result.frameDelta}, media +${result.mediaTimeDelta.toFixed(3)}s, ` +
-            `audio tracks ${result.audioTracks}\n`
+        `${browserName}: decoded ${media.width}x${media.height}, ` +
+            `frames +${frames.second.presentedFrames - frames.first.presentedFrames}, ` +
+            `media +${(frames.second.mediaTime - frames.first.mediaTime).toFixed(3)}s, ` +
+            `audio tracks ${media.audioTracks}\n`
     );
 } catch (error) {
     const message =
