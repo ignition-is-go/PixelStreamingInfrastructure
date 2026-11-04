@@ -39,7 +39,7 @@ switch (browserName) {
             .forBrowser('chrome')
             .setChromeOptions(
                 new chrome.Options()
-                    .setPageLoadStrategy('none')
+                    .setPageLoadStrategy('eager')
                     .addArguments('--headless=new')
                     .addArguments('--no-sandbox')
                     .addArguments('--disable-dev-shm-usage')
@@ -49,12 +49,12 @@ switch (browserName) {
     case 'firefox':
         builder = builder
             .forBrowser('firefox')
-            .setFirefoxOptions(new firefox.Options().setPageLoadStrategy('none').addArguments('-headless'));
+            .setFirefoxOptions(new firefox.Options().setPageLoadStrategy('eager').addArguments('-headless'));
         break;
     case 'safari':
         builder = builder
             .forBrowser('safari')
-            .setSafariOptions(new safari.Options().setPageLoadStrategy('none'));
+            .setSafariOptions(new safari.Options().setPageLoadStrategy('eager'));
         break;
     default: {
         const exhaustive = browserName;
@@ -65,8 +65,12 @@ switch (browserName) {
 let driver;
 try {
     driver = await builder.build();
-    await driver.manage().setTimeouts({ pageLoad: timeoutMs, script: timeoutMs + 10000 });
-    await driver.get(viewerUrl);
+    await driver.manage().setTimeouts({ pageLoad: 10000, script: timeoutMs + 10000 });
+    try {
+        await driver.get(viewerUrl);
+    } catch (error) {
+        if (!(error instanceof Error) || error.name !== 'TimeoutError') throw error;
+    }
 
     const deadline = Date.now() + timeoutMs;
     const overlayClicks = { connect: 0, play: 0 };
@@ -101,6 +105,9 @@ try {
             return {
                 width: video?.videoWidth ?? 0,
                 height: video?.videoHeight ?? 0,
+                readyState: document.readyState,
+                bodyChildren: document.body?.childElementCount ?? 0,
+                scripts: document.scripts.length,
                 videoElements: elements.filter((element) => element instanceof HTMLVideoElement).length,
                 attachedStreams: streams.length,
                 liveVideoTracks: videoTracks.filter((track) => track.readyState === 'live').length,
@@ -117,6 +124,9 @@ try {
     if (!media || media.width === 0 || media.height === 0) {
         const state = media ?? {
             videoElements: 0,
+            readyState: 'missing',
+            bodyChildren: 0,
+            scripts: 0,
             attachedStreams: 0,
             liveVideoTracks: 0,
             mutedVideoTracks: 0,
@@ -124,6 +134,7 @@ try {
         };
         throw new SmokeFailure(
             'no decoded production video appeared before the deadline; ' +
+                `document ${state.readyState}, body children ${state.bodyChildren}, scripts ${state.scripts}, ` +
                 `video elements ${state.videoElements}, attached streams ${state.attachedStreams}, ` +
                 `live video tracks ${state.liveVideoTracks}, muted video tracks ${state.mutedVideoTracks}, ` +
                 `live audio tracks ${state.audioTracks}, connect clicks ${overlayClicks.connect}, ` +
