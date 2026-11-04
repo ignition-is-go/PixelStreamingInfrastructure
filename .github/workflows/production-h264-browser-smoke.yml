@@ -1,0 +1,72 @@
+name: Production H264 browser smoke
+
+on:
+    workflow_dispatch:
+        inputs:
+            expected_width:
+                description: Expected decoded video width
+                required: true
+                default: '3840'
+            expected_height:
+                description: Expected decoded video height
+                required: true
+                default: '2160'
+
+permissions:
+    contents: read
+
+concurrency:
+    group: production-h264-browser-smoke
+    cancel-in-progress: false
+
+jobs:
+    decode:
+        name: Decode in ${{ matrix.browser }}
+        runs-on:
+            group: ci-macos-ephemeral
+            labels: [self-hosted, macOS, ARM64, site-lucid-lab, cpu-ge-8, disk-ge-100g]
+        timeout-minutes: 15
+        environment: hrlv-production
+        strategy:
+            fail-fast: false
+            matrix:
+                browser: [chromium, firefox, safari]
+        env:
+            PIXELSTREAM_BROWSER: ${{ matrix.browser }}
+            PIXELSTREAM_PRODUCTION_VIEWER_URL: ${{ secrets.PIXELSTREAM_PRODUCTION_VIEWER_URL }}
+            PIXELSTREAM_EXPECTED_WIDTH: ${{ inputs.expected_width }}
+            PIXELSTREAM_EXPECTED_HEIGHT: ${{ inputs.expected_height }}
+            PIXELSTREAM_TIMEOUT_MS: '60000'
+        steps:
+            - name: Check out the maintained release line
+              uses: actions/checkout@v4
+
+            - name: Set up Node.js
+              uses: actions/setup-node@v4
+              with:
+                  node-version-file: NODE_VERSION
+                  cache: npm
+
+            - name: Install locked browser-test dependencies
+              run: npm ci --workspace=Extras/FrontendTests
+
+            - name: Install shipping Chrome
+              if: matrix.browser == 'chromium'
+              run: brew install --cask google-chrome
+
+            - name: Install shipping Firefox and WebDriver
+              if: matrix.browser == 'firefox'
+              run: |
+                  brew install --cask firefox
+                  brew install geckodriver
+
+            - name: Enable Safari WebDriver
+              if: matrix.browser == 'safari'
+              run: sudo safaridriver --enable
+
+            - name: Require the protected production endpoint
+              run: test -n "$PIXELSTREAM_PRODUCTION_VIEWER_URL"
+
+            - name: Decode production H264 video and audio
+              working-directory: Extras/FrontendTests
+              run: npm run test:h264:production
