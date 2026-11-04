@@ -31,7 +31,7 @@ const timeoutMs = positiveInteger('PIXELSTREAM_TIMEOUT_MS', '60000');
 
 class SmokeFailure extends Error {}
 
-let builder = new Builder();
+let builder = new Builder().setCapability('pageLoadStrategy', 'eager');
 switch (browserName) {
     case 'chromium':
         builder = builder
