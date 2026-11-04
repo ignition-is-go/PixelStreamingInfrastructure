@@ -18,32 +18,41 @@ a=rtcp-mux\r
 a=rtpmap:96 H264/90000\r
 a=rtcp-fb:96 nack\r
 a=rtcp-fb:96 nack pli\r
-a=fmtp:96 level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42e01f\r
+a=fmtp:96 level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=PROFILE\r
 a=ssrc:1234 cname:program\r
 `;
 
-test('accepts the fleet H.264 constrained-baseline video profile', async ({ page }) => {
-  const supportsH264 = await page.evaluate(() =>
-    RTCRtpReceiver.getCapabilities('video')?.codecs.some(
-      (codec) => codec.mimeType.toLowerCase() === 'video/h264',
-    ) ?? false,
-  );
-  if (!supportsH264 && process.env.REQUIRE_H264 !== '1') {
-    test.skip(true, 'This portable browser build has no platform H.264 codec');
-  }
-  expect(supportsH264, 'browser must expose a platform H.264 decoder').toBe(true);
+for (const [name, profile] of [
+    ['constrained baseline', '42e01f'],
+    ['baseline', '42001f']
+] as const) {
+    test(`accepts the fleet H.264 ${name} video profile`, async ({ page }) => {
+        const supportsH264 = await page.evaluate(
+            () =>
+                RTCRtpReceiver.getCapabilities('video')?.codecs.some(
+                    (codec) => codec.mimeType.toLowerCase() === 'video/h264'
+                ) ?? false
+        );
+        if (!supportsH264 && process.env.REQUIRE_H264 !== '1') {
+            test.skip(true, 'This portable browser build has no platform H.264 codec');
+        }
+        expect(supportsH264, 'browser must expose a platform H.264 decoder').toBe(true);
 
-  const answer = await page.evaluate(async (offer) => {
-    const peer = new RTCPeerConnection();
-    try {
-      await peer.setRemoteDescription({ type: 'offer', sdp: offer });
-      const description = await peer.createAnswer();
-      return description.sdp ?? '';
-    } finally {
-      peer.close();
-    }
-  }, H264_BASELINE_OFFER);
+        const answer = await page.evaluate(
+            async (offer) => {
+                const peer = new RTCPeerConnection();
+                try {
+                    await peer.setRemoteDescription({ type: 'offer', sdp: offer });
+                    const description = await peer.createAnswer();
+                    return description.sdp ?? '';
+                } finally {
+                    peer.close();
+                }
+            },
+            H264_BASELINE_OFFER.replace('PROFILE', profile)
+        );
 
-  expect(answer).toMatch(/m=video (?!0 )\d+ UDP\/TLS\/RTP\/SAVPF 96/);
-  expect(answer).toContain('profile-level-id=42e01f');
-});
+        expect(answer).toMatch(/m=video (?!0 )\d+ UDP\/TLS\/RTP\/SAVPF 96/);
+        expect(answer).toContain(`profile-level-id=${profile}`);
+    });
+}
