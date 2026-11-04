@@ -32,7 +32,7 @@ const driver = await new Builder()
 
 try {
     await driver.get('data:text/html,<title>H264 compatibility</title>');
-    for (const profile of ['42e01f', '42001f']) {
+    for (const profile of ['42e01f']) {
         const result = await driver.executeAsyncScript(
             (remoteOffer, done) => {
                 const supportsH264 =

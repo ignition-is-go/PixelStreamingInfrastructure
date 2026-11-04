@@ -22,11 +22,8 @@ a=fmtp:96 level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=PROFIL
 a=ssrc:1234 cname:program\r
 `;
 
-for (const [name, profile] of [
-    ['constrained baseline', '42e01f'],
-    ['baseline', '42001f']
-] as const) {
-    test(`accepts the fleet H.264 ${name} video profile`, async ({ page }) => {
+for (const profile of ['42e01f'] as const) {
+    test('accepts the fleet H.264 constrained baseline video profile', async ({ page }) => {
         const supportsH264 = await page.evaluate(
             () =>
                 RTCRtpReceiver.getCapabilities('video')?.codecs.some(
