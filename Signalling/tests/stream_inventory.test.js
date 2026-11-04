@@ -39,7 +39,7 @@ async function connect(url) {
     return { socket, next };
 }
 
-async function connection(signalling, Kind, name) {
+async function connection(signalling, Kind, name, feed) {
     const server = new WebSocketServer({ port: 0, host: '127.0.0.1' });
     await new Promise((resolve) => server.once('listening', resolve));
     const accepted = new Promise((resolve) => server.once('connection', resolve));
@@ -49,7 +49,7 @@ async function connection(signalling, Kind, name) {
         signalling.streamerRegistry.add(native);
         native.transport.on('close', () => signalling.streamerRegistry.remove(native));
         await client.next((message) => message.type === 'identify');
-        client.socket.send(JSON.stringify({ type: 'endpointId', id: name }));
+        client.socket.send(JSON.stringify({ type: 'endpointId', id: name, ...(feed ? { feed } : {}) }));
         await client.next((message) => message.type === 'endpointIdConfirm');
     }
     if (Kind !== StreamerConnection) signalling.playerRegistry.add(native);
@@ -170,5 +170,77 @@ test(
         await a.close();
         await observer.next((value) => !value.streams.some((stream) => stream.streamerId === 'direct-a'));
         assert.equal(signalling.streamerRegistry.find('direct-a'), undefined);
+    }
+);
+
+test(
+    'SFU feed advertisements update live inventory without changing media availability',
+    { timeout: 15000 },
+    async (t) => {
+        const signalling = {
+            config: {},
+            streamerRegistry: new StreamerRegistry(),
+            playerRegistry: new PlayerRegistry()
+        };
+        const publisher = new StreamInventoryServer(signalling.streamerRegistry, {
+            host: '127.0.0.1',
+            port: 0
+        });
+        await new Promise((resolve) => publisher.server.once('listening', resolve));
+        const observer = await connect(`ws://127.0.0.1:${publisher.server.address().port}`);
+        const connections = [];
+        t.after(async () => {
+            await publisher.close();
+            await Promise.all(connections.map((item) => item.close()));
+        });
+        await observer.next(() => true);
+        const legacy = await connection(signalling, SFUConnection, 'legacy');
+        connections.push(legacy);
+        let snapshot = await observer.next((value) =>
+            value.streams.some((stream) => stream.streamerId === 'legacy')
+        );
+        assert.equal(snapshot.streams[0].feed, undefined);
+        const sfu = await connection(signalling, SFUConnection, 'third', {
+            id: 'Arbitrary third feed',
+            kind: 'program',
+            route: 'edge'
+        });
+        connections.push(sfu);
+        snapshot = await observer.next((value) =>
+            value.streams.some((stream) => stream.feed?.id === 'Arbitrary third feed')
+        );
+        assert.deepEqual(snapshot.streams.find((stream) => stream.feed).feed, {
+            id: 'Arbitrary third feed',
+            kind: 'program',
+            route: 'edge'
+        });
+        sfu.socket.send(
+            JSON.stringify({
+                type: 'endpointId',
+                id: 'changed',
+                feed: { id: 'Changed feed', kind: 'preview', route: 'local' }
+            })
+        );
+        await sfu.next((message) => message.type === 'endpointIdConfirm');
+        await observer.next((value) => value.streams.some((stream) => stream.feed?.id === 'Changed feed'));
+        let index = 0;
+        for (const feed of [
+            { id: '', kind: 'program', route: 'edge' },
+            { id: 'bad', kind: 'other', route: 'edge' },
+            { id: 'bad', kind: 'program', route: 'direct' },
+            null
+        ]) {
+            const id = `invalid-${index++}`;
+            sfu.socket.send(JSON.stringify({ type: 'endpointId', id, feed }));
+            await sfu.next((message) => message.type === 'endpointIdConfirm');
+            snapshot = await observer.next((value) =>
+                value.streams.some((stream) => stream.streamerId === id)
+            );
+            assert.equal(snapshot.streams.find((stream) => stream.streamerId === id).feed, undefined);
+            assert.equal(sfu.native.streaming, true);
+        }
+        const id = sfu.native.streamerId;
+        await sfu.close();
+        await observer.next((value) => !value.streams.some((stream) => stream.streamerId === id));
     }
 );

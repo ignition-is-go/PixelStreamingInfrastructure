@@ -1,5 +1,8 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
-import type { StreamEndpoint, StreamInventorySnapshot } from '@ignition-is-go/pulse-pixelstreaming-protocol-types';
+import type {
+    StreamEndpoint,
+    StreamInventorySnapshot
+} from '@ignition-is-go/pulse-pixelstreaming-protocol-types';
 import { WebSocket, WebSocketServer } from 'ws';
 import { SFUConnection } from './SFUConnection';
 import { StreamerRegistry } from './StreamerRegistry';
@@ -13,6 +16,7 @@ export function streamInventory(registry: StreamerRegistry): StreamInventorySnap
             .map(
                 (streamer): StreamEndpoint => ({
                     streamerId: streamer.streamerId,
+                    ...(streamer instanceof SFUConnection && streamer.feed ? { feed: streamer.feed } : {}),
                     producerKind: streamer instanceof SFUConnection ? 'sfu' : 'streamer',
                     availableToPlayers: available.has(streamer),
                     upstreamStreamerId:
