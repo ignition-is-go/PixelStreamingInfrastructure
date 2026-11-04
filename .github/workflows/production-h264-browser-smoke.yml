@@ -16,7 +16,7 @@ permissions:
     contents: read
 
 concurrency:
-    group: production-h264-browser-smoke
+    group: production-h264-browser-smoke-v2
     cancel-in-progress: false
 
 jobs:
