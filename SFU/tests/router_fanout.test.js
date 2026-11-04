@@ -203,6 +203,48 @@ test('concurrent first viewers share one complete audio and video target', async
     firstResult.route.close();
     assert.equal(firstResult.route.mediaProducers[0].closed, false);
     assert.equal(secondResult.route.transport.closed, false);
+    secondResult.route.close();
+    assert.equal(firstResult.route.mediaProducers.every(({ closed }) => closed), true);
+});
+
+test('last viewer closes idle media pipes and a returning viewer creates fresh pipes', async () => {
+    const { fanout, workers } = await createHarness(2);
+    const generation = fanout.openGeneration({
+        generation: 1,
+        producers: [mediaProducer('audio', 'audio'), mediaProducer('video', 'video')]
+    });
+    const opened = await generation.openPlayer({ playerId: 'first', isCurrent: () => true });
+    opened.route.close();
+    opened.route.close();
+    assert.equal(opened.route.mediaProducers.every(({ closed }) => closed), true);
+    const returned = await generation.openPlayer({ playerId: 'returned', isCurrent: () => true });
+    assert.equal(workers[0].router.pipeCalls.length, 4);
+    assert.notEqual(returned.route.mediaProducers, opened.route.mediaProducers);
+    assert.equal(returned.route.mediaProducers.every(({ closed }) => !closed), true);
+    returned.route.close();
+    fanout.close();
+});
+
+test('failed transport creation releases its unused media pipes', async () => {
+    const { fanout, workers } = await createHarness(2);
+    const pair = {
+        pipeConsumer: new FakeEntity('consumer'),
+        pipeProducer: new FakeEntity('producer')
+    };
+    workers[0].router.pipeResults.push(pair);
+    workers[1].router.transportResults.push(Promise.reject(new Error('transport failed')));
+    const generation = fanout.openGeneration({
+        generation: 1,
+        producers: [mediaProducer('video', 'video')]
+    });
+    await assert.rejects(generation.openPlayer({ playerId: 'failed', isCurrent: () => true }), /transport failed/);
+    assert.equal(pair.pipeConsumer.closed, true);
+    assert.equal(pair.pipeProducer.closed, true);
+    const retried = await generation.openPlayer({ playerId: 'retry', isCurrent: () => true });
+    assert.equal(retried.kind, 'ready');
+    assert.equal(workers[0].router.pipeCalls.length, 2);
+    retried.route.close();
+    fanout.close();
 });
 
 test('least-active reservations happen before awaits and release exactly once', async () => {
@@ -346,7 +388,7 @@ test('closing during transport and data pipe awaits cleans only peer-owned resou
     assert.deepEqual(await piped, { kind: 'stale' });
     assert.equal(dataPair.pipeDataConsumer.closed, true);
     assert.equal(dataPair.pipeDataProducer.closed, true);
-    assert.equal(opened.route.mediaProducers[0].closed, false);
+    assert.equal(opened.route.mediaProducers[0].closed, true);
 });
 
 test('generation close during a media pipe await closes the late pair', async () => {
@@ -502,8 +544,27 @@ test('native two-worker fanout exposes audio, video, and bidirectional data loca
         });
         assert.equal(ingressConsumer.label, 'viewer-to-ingress');
 
+        opened.route.close();
+        assert.equal(opened.route.mediaProducers.every(({ closed }) => closed), true);
+        assert.equal(audio.closed, false);
+        assert.equal(video.closed, false);
+        const returning = await generation.openPlayer({
+            playerId: 'native-returning',
+            isCurrent: () => true
+        });
+        assert.equal(returning.kind, 'ready');
+        for (const producer of returning.route.mediaProducers) {
+            assert.equal(producer.closed, false);
+            const consumer = await returning.route.transport.consume({
+                producerId: producer.id,
+                rtpCapabilities: returning.route.rtpCapabilities,
+                paused: true
+            });
+            assert.equal(consumer.kind, producer.kind);
+        }
         generation.close();
         assert.equal(opened.route.transport.closed, true);
+        assert.equal(returning.route.transport.closed, true);
     } finally {
         fanout.close();
     }
