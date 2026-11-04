@@ -69,12 +69,19 @@ try {
     await driver.get(viewerUrl);
 
     const deadline = Date.now() + timeoutMs;
+    const overlayClicks = { connect: 0, play: 0 };
     let media;
     while (Date.now() < deadline) {
-        for (const selector of ['#connectOverlay', '#playOverlay']) {
+        for (const [kind, selector] of [
+            ['connect', '#connectOverlay'],
+            ['play', '#playOverlay']
+        ]) {
             const overlays = await driver.findElements(By.css(selector));
             for (const overlay of overlays) {
-                if (await overlay.isDisplayed()) await overlay.click();
+                if (await overlay.isDisplayed()) {
+                    await overlay.click();
+                    overlayClicks[kind] += 1;
+                }
             }
         }
 
@@ -83,6 +90,7 @@ try {
             const streams = elements
                 .map((element) => element.srcObject)
                 .filter((stream) => stream instanceof MediaStream);
+            const videoTracks = streams.flatMap((stream) => stream.getVideoTracks());
             const video = elements.find(
                 (element) =>
                     element instanceof HTMLVideoElement &&
@@ -93,6 +101,10 @@ try {
             return {
                 width: video?.videoWidth ?? 0,
                 height: video?.videoHeight ?? 0,
+                videoElements: elements.filter((element) => element instanceof HTMLVideoElement).length,
+                attachedStreams: streams.length,
+                liveVideoTracks: videoTracks.filter((track) => track.readyState === 'live').length,
+                mutedVideoTracks: videoTracks.filter((track) => track.muted).length,
                 audioTracks: streams
                     .flatMap((stream) => stream.getAudioTracks())
                     .filter((track) => track.readyState === 'live').length
@@ -103,7 +115,20 @@ try {
     }
 
     if (!media || media.width === 0 || media.height === 0) {
-        throw new SmokeFailure('no decoded production video appeared before the deadline');
+        const state = media ?? {
+            videoElements: 0,
+            attachedStreams: 0,
+            liveVideoTracks: 0,
+            mutedVideoTracks: 0,
+            audioTracks: 0
+        };
+        throw new SmokeFailure(
+            'no decoded production video appeared before the deadline; ' +
+                `video elements ${state.videoElements}, attached streams ${state.attachedStreams}, ` +
+                `live video tracks ${state.liveVideoTracks}, muted video tracks ${state.mutedVideoTracks}, ` +
+                `live audio tracks ${state.audioTracks}, connect clicks ${overlayClicks.connect}, ` +
+                `play clicks ${overlayClicks.play}`
+        );
     }
     if (media.audioTracks === 0) {
         throw new SmokeFailure('no live production audio track appeared before the deadline');
