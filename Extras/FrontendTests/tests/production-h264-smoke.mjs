@@ -1,6 +1,7 @@
 import { Builder } from 'selenium-webdriver';
 import chrome from 'selenium-webdriver/chrome.js';
 import firefox from 'selenium-webdriver/firefox.js';
+import safari from 'selenium-webdriver/safari.js';
 
 const browserNames = new Set(['chromium', 'firefox', 'safari']);
 
@@ -38,6 +39,7 @@ switch (browserName) {
             .forBrowser('chrome')
             .setChromeOptions(
                 new chrome.Options()
+                    .setPageLoadStrategy('eager')
                     .addArguments('--headless=new')
                     .addArguments('--no-sandbox')
                     .addArguments('--disable-dev-shm-usage')
@@ -47,18 +49,18 @@ switch (browserName) {
     case 'firefox':
         builder = builder
             .forBrowser('firefox')
-            .setFirefoxOptions(new firefox.Options().addArguments('-headless'));
+            .setFirefoxOptions(new firefox.Options().setPageLoadStrategy('eager').addArguments('-headless'));
         break;
     case 'safari':
-        builder = builder.forBrowser('safari');
+        builder = builder
+            .forBrowser('safari')
+            .setSafariOptions(new safari.Options().setPageLoadStrategy('eager'));
         break;
     default: {
         const exhaustive = browserName;
         throw new Error(`Unsupported browser: ${exhaustive}`);
     }
 }
-
-builder = builder.setCapability('pageLoadStrategy', 'eager');
 
 let driver;
 try {
