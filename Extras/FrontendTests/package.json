@@ -8,6 +8,7 @@
         "test": "npx playwright test",
         "test:h264": "REQUIRE_H264=1 npx playwright test --config h264-compat.config.ts --project chromium --project webkit && npx playwright test --config h264-compat.config.ts --project firefox",
         "test:h264:firefox-release": "node tests/h264-firefox-release.mjs",
+        "test:h264:production": "node tests/production-h264-smoke.mjs",
         "build": "",
         "clean": "",
         "lint": ""
