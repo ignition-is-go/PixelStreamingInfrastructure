@@ -29,6 +29,8 @@ const expectedWidth = positiveInteger('PIXELSTREAM_EXPECTED_WIDTH', '3840');
 const expectedHeight = positiveInteger('PIXELSTREAM_EXPECTED_HEIGHT', '2160');
 const timeoutMs = positiveInteger('PIXELSTREAM_TIMEOUT_MS', '60000');
 
+class SmokeFailure extends Error {}
+
 let builder = new Builder();
 switch (browserName) {
     case 'chromium':
@@ -56,8 +58,9 @@ switch (browserName) {
     }
 }
 
-const driver = await builder.build();
+let driver;
 try {
+    driver = await builder.build();
     await driver.manage().setTimeouts({ pageLoad: timeoutMs, script: timeoutMs });
     await driver.get(viewerUrl);
 
@@ -129,12 +132,17 @@ try {
         timeoutMs
     );
 
-    if (result.kind !== 'success') throw new Error(result.message);
+    if (result.kind !== 'success') throw new SmokeFailure(result.message);
     process.stdout.write(
         `${browserName}: decoded ${result.width}x${result.height}, ` +
             `frames +${result.frameDelta}, media +${result.mediaTimeDelta.toFixed(3)}s, ` +
             `audio tracks ${result.audioTracks}\n`
     );
+} catch (error) {
+    const message =
+        error instanceof SmokeFailure ? error.message : 'browser automation failed before decode validation';
+    process.stderr.write(`${browserName}: ${message}\n`);
+    process.exitCode = 1;
 } finally {
-    await driver.quit();
+    if (driver) await driver.quit();
 }

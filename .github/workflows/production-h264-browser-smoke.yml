@@ -33,6 +33,7 @@ jobs:
                 browser: [chromium, firefox, safari]
         env:
             PIXELSTREAM_BROWSER: ${{ matrix.browser }}
+            PIXELSTREAM_PRODUCTION_HOSTS: ${{ secrets.PIXELSTREAM_PRODUCTION_HOSTS }}
             PIXELSTREAM_PRODUCTION_VIEWER_URL: ${{ secrets.PIXELSTREAM_PRODUCTION_VIEWER_URL }}
             PIXELSTREAM_EXPECTED_WIDTH: ${{ inputs.expected_width }}
             PIXELSTREAM_EXPECTED_HEIGHT: ${{ inputs.expected_height }}
@@ -65,7 +66,12 @@ jobs:
               run: sudo safaridriver --enable
 
             - name: Require the protected production endpoint
-              run: test -n "$PIXELSTREAM_PRODUCTION_VIEWER_URL"
+              run: |
+                  test -n "$PIXELSTREAM_PRODUCTION_HOSTS"
+                  test -n "$PIXELSTREAM_PRODUCTION_VIEWER_URL"
+
+            - name: Configure protected production name resolution
+              run: printf '%s\n' "$PIXELSTREAM_PRODUCTION_HOSTS" | sudo tee -a /etc/hosts >/dev/null
 
             - name: Decode production H264 video and audio
               working-directory: Extras/FrontendTests
