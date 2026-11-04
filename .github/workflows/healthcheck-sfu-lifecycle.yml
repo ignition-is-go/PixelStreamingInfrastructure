@@ -64,8 +64,12 @@ jobs:
               run: npx playwright install firefox webkit
               working-directory: Extras/FrontendTests
 
-            - name: Require H.264 decoding in Firefox and Safari's WebKit engine
-              run: npx playwright test --config h264-compat.config.ts --project firefox --project webkit
+            - name: Exercise Firefox H.264 capability detection
+              run: npx playwright test --config h264-compat.config.ts --project firefox
+              working-directory: Extras/FrontendTests
+
+            - name: Require H.264 decoding in Safari's WebKit engine
+              run: npx playwright test --config h264-compat.config.ts --project webkit
               working-directory: Extras/FrontendTests
               env:
                   REQUIRE_H264: '1'

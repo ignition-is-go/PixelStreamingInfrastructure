@@ -29,7 +29,7 @@ test('accepts the fleet H.264 constrained-baseline video profile', async ({ page
     ) ?? false,
   );
   if (!supportsH264 && process.env.REQUIRE_H264 !== '1') {
-    test.skip(true, 'This portable Firefox build has no platform H.264 codec');
+    test.skip(true, 'This portable browser build has no platform H.264 codec');
   }
   expect(supportsH264, 'browser must expose a platform H.264 decoder').toBe(true);
 
