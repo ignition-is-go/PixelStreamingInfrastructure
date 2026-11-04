@@ -61,7 +61,7 @@ switch (browserName) {
 let driver;
 try {
     driver = await builder.build();
-    await driver.manage().setTimeouts({ pageLoad: timeoutMs, script: timeoutMs });
+    await driver.manage().setTimeouts({ pageLoad: timeoutMs, script: timeoutMs + 10000 });
     await driver.get(viewerUrl);
 
     const result = await driver.executeAsyncScript(
