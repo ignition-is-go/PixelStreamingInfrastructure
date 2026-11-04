@@ -219,19 +219,36 @@ async function createRouterFanout({
         }
 
         function targetFor(slot) {
-            const cached = targets.get(slot.index);
-            if (cached) {
-                return cached;
+            let entry = targets.get(slot.index);
+            if (!entry) {
+                entry = { users: 0, target: null, pending: null };
+                targets.set(slot.index, entry);
+                entry.pending = createTarget(slot).then((target) => {
+                    entry.target = target;
+                    if (generationClosed || entry.users === 0) {
+                        closeTarget(target);
+                        if (targets.get(slot.index) === entry) targets.delete(slot.index);
+                    }
+                    return target;
+                }, (error) => {
+                    if (targets.get(slot.index) === entry) targets.delete(slot.index);
+                    throw error;
+                });
             }
-
-            const pending = createTarget(slot);
-            targets.set(slot.index, pending);
-            pending.catch(() => {
-                if (targets.get(slot.index) === pending) {
-                    targets.delete(slot.index);
+            entry.users += 1;
+            let released = false;
+            return {
+                pending: entry.pending,
+                release() {
+                    if (released) return;
+                    released = true;
+                    entry.users -= 1;
+                    if (entry.users === 0 && entry.target) {
+                        closeTarget(entry.target);
+                        if (targets.get(slot.index) === entry) targets.delete(slot.index);
+                    }
                 }
-            });
-            return pending;
+            };
         }
 
         async function openPlayer({ playerId, isCurrent, identifier = `Peer ${playerId}` }) {
@@ -240,18 +257,23 @@ async function createRouterFanout({
             }
             const reservation = reserveViewer(playerId);
             let transport = null;
+            const targetReservation = targetFor(reservation.slot);
+            function release() {
+                targetReservation.release();
+                reservation.release();
+            }
 
             try {
-                const target = await targetFor(reservation.slot);
+                const target = await targetReservation.pending;
                 if (!target || generationClosed || !isCurrent()) {
-                    reservation.release();
+                    release();
                     return { kind: 'stale' };
                 }
 
                 transport = await createWebRtcTransport(reservation.slot, { identifier });
                 if (generationClosed || !isCurrent()) {
                     closeIfOpen(transport);
-                    reservation.release();
+                    release();
                     return { kind: 'stale' };
                 }
 
@@ -285,7 +307,7 @@ async function createRouterFanout({
                             closePipeResult(result);
                         }
                         closeIfOpen(transport);
-                        reservation.release();
+                        release();
                     }
                 };
 
@@ -316,7 +338,7 @@ async function createRouterFanout({
                 return { kind: 'ready', route };
             } catch (error) {
                 closeIfOpen(transport);
-                reservation.release();
+                release();
                 throw error;
             }
         }
@@ -332,8 +354,9 @@ async function createRouterFanout({
                 for (const route of [...playerRoutes]) {
                     route.close();
                 }
-                for (const pending of targets.values()) {
-                    void pending.then(closeTarget, () => {});
+                for (const entry of targets.values()) {
+                    if (entry.target) closeTarget(entry.target);
+                    else void entry.pending.then(closeTarget, () => {});
                 }
                 targets.clear();
             }
