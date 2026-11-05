@@ -40,7 +40,7 @@ async function decode(page, worker, fixture, bindIp) {
             document.body.append(video);
             const peer = window.probePeer = new RTCPeerConnection({iceServers: []});
             peer.ontrack = event => {
-                if (event.track.id === 'probator') return;
+                if (event.transceiver.mid === 'probator' || event.track.id === 'probator') return;
                 video.srcObject = new MediaStream([event.track]);
                 void video.play().catch(() => {});
             };
