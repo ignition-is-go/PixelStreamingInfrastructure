@@ -11,7 +11,8 @@
         "test:h264:production": "node tests/production-h264-smoke.mjs",
         "build": "",
         "clean": "",
-        "lint": ""
+        "lint": "",
+        "test:h264:production-policy": "node --test tests/production-h264-*.test.*"
     },
     "keywords": [],
     "author": "Epic Games",
