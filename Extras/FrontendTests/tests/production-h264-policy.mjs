@@ -20,6 +20,8 @@ export function requireMediaFormat(sample, expected) {
         sample.relayProtocols.every((value) => value === 'udp'),
         'media uses a TCP or TLS TURN connection'
     );
+    requireCondition(typeof sample.video.track === 'string' && typeof sample.video.statsId === 'string' &&
+        Number.isFinite(sample.video.ssrc), 'rendered video identity is unavailable');
     requireCondition(Number.isFinite(sample.video.decoded), 'video decode counter is unavailable');
     requireCondition(Number.isFinite(sample.audio.samples), 'audio decode counter is unavailable');
 }
@@ -28,6 +30,9 @@ export function requirePlayback(before, after, expected) {
     requireMediaFormat(before, expected);
     requireMediaFormat(after, expected);
     requireCondition(before.peer === after.peer, 'media peer changed during observation');
+    for (const key of ['track', 'statsId', 'ssrc']) {
+        requireCondition(before.video[key] === after.video[key], 'rendered video identity changed during observation');
+    }
     const elapsed = (after.at - before.at) / 1000;
     requireCondition(elapsed >= expected.seconds, 'playback observation was too short');
     const decoded = after.video.decoded - before.video.decoded;

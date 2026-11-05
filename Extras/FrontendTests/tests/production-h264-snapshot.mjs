@@ -12,13 +12,18 @@ export async function mediaSnapshot() {
             candidate.getReceivers().some((receiver) => receiver.track?.id === track.id)
     );
     if (!peer) throw new Error('rendered video has no connected observed peer');
+    const receiver = peer.getReceivers().find((item) => item.track?.id === track.id);
     const reports = await peer.getStats();
+    const renderedReports = await receiver.getStats();
     const inbound = [...reports.values()].filter((item) => item.type === 'inbound-rtp' && !item.isRemote);
     const active = (kind) => inbound
         .filter((item) => (item.kind ?? item.mediaType) === kind && item.codecId && item.bytesReceived > 0)
         .sort((a, b) => (b.lastPacketReceivedTimestamp ?? 0) - (a.lastPacketReceivedTimestamp ?? 0) ||
             b.bytesReceived - a.bytesReceived)[0];
-    const videoStats = active('video');
+    const videoStats = [...renderedReports.values()].find((item) =>
+        item.type === 'inbound-rtp' && !item.isRemote &&
+        (item.kind ?? item.mediaType) === 'video' && item.codecId && item.bytesReceived > 0 &&
+        (!item.trackIdentifier || item.trackIdentifier === track.id));
     const audioStats = active('audio');
     if (!videoStats || !audioStats) throw new Error('video and audio RTP statistics are not ready');
     const transport = reports.get(videoStats.transportId);
@@ -41,6 +46,9 @@ export async function mediaSnapshot() {
             resolve(frame);
         });
     });
+    if (video.srcObject.getVideoTracks()[0]?.id !== track.id || receiver.track?.id !== track.id) {
+        throw new Error('rendered track changed while sampling');
+    }
     const audioCodec = reports.get(audioStats.codecId);
     return {
         at: Date.now(),
@@ -49,7 +57,10 @@ export async function mediaSnapshot() {
         protocols: candidates.map((item) => item?.protocol?.toLowerCase() ?? 'unknown'),
         relayProtocols: candidates.flatMap((item) => item?.relayProtocol ? [item.relayProtocol.toLowerCase()] : []),
         video: {
-            codec: reports.get(videoStats.codecId)?.mimeType ?? null,
+            track: track.id,
+            statsId: videoStats.id,
+            ssrc: videoStats.ssrc,
+            codec: (renderedReports.get(videoStats.codecId) ?? reports.get(videoStats.codecId))?.mimeType ?? null,
             width: video.videoWidth,
             height: video.videoHeight,
             decoded: videoStats.framesDecoded ?? null,

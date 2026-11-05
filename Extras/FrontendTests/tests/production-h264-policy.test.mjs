@@ -6,7 +6,7 @@ const expected = { width: 3840, height: 2160, seconds: 30, minimumFps: 24 };
 function samples() {
     const before = {
         at: 0, peer: 1, connection: 'connected', protocols: ['udp', 'udp'], relayProtocols: [],
-        video: { codec: 'video/H264', width: 3840, height: 2160, decoded: 10, presented: 10, mediaTime: 1, freezes: 0 },
+        video: { track: 'video-track', statsId: 'video-rtp', ssrc: 123, codec: 'video/H264', width: 3840, height: 2160, decoded: 10, presented: 10, mediaTime: 1, freezes: 0 },
         audio: { codec: 'audio/opus', packets: 10, samples: 48000, rate: 48000, concealed: 0 }
     };
     const after = structuredClone(before);
@@ -37,6 +37,9 @@ for (const [name, change, message] of [
     ['missing audio decode evidence', (s) => { s.audio.samples = null; }, /counter is unavailable/],
     ['choppy concealed audio', (s) => { s.audio.concealed = 400000; }, /concealment/],
     ['video freeze', (s) => { s.video.freezes = 1; }, /froze/],
+    ['rendered track replacement', (s) => { s.video.track = 'different-track'; }, /identity changed/],
+    ['SSRC replacement', (s) => { s.video.ssrc = 42; }, /identity changed/],
+    ['RTP report replacement', (s) => { s.video.statsId = 'other'; }, /identity changed/],
     ['peer replacement', (s) => { s.peer = 2; }, /peer changed/],
     ['two-frame smoke window', (s) => { s.at = 67; }, /too short/]
 ]) {

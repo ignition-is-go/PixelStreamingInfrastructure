@@ -18,11 +18,18 @@ function positiveInteger(name, fallback) {
     return value;
 }
 
-const browserName = requiredEnvironment('PIXELSTREAM_BROWSER');
+const reportFile = requiredEnvironment('PIXELSTREAM_SMOKE_REPORT');
+const report = { schemaVersion: reportVersion, sourceCommit: process.env.PIXELSTREAM_SOURCE_COMMIT,
+    browser: process.env.PIXELSTREAM_BROWSER, sessions: [], success: false };
+class SmokeFailure extends Error {}
+let driver;
+let phase = 'configuration';
+let browserName = process.env.PIXELSTREAM_BROWSER;
+try {
+browserName = requiredEnvironment('PIXELSTREAM_BROWSER');
 const browsers = { chromium: 'chrome', firefox: 'firefox', safari: 'safari' };
 if (!Object.hasOwn(browsers, browserName)) throw new Error('unsupported PIXELSTREAM_BROWSER');
 const viewerUrl = requiredEnvironment('PIXELSTREAM_PRODUCTION_VIEWER_URL');
-const reportFile = requiredEnvironment('PIXELSTREAM_SMOKE_REPORT');
 const sourceCommit = requiredEnvironment('PIXELSTREAM_SOURCE_COMMIT');
 if (!/^[0-9a-f]{40}$/i.test(sourceCommit)) throw new Error('PIXELSTREAM_SOURCE_COMMIT must be an exact Git commit');
 const expected = {
@@ -35,13 +42,12 @@ if (expected.seconds < 30 || expected.minimumFps < 24) {
     throw new Error('the qualification gate requires at least thirty seconds and 24 fps');
 }
 const rejoins = positiveInteger('PIXELSTREAM_REJOINS', '2');
+if (rejoins < 2) throw new Error('the qualification gate requires at least two rejoins');
 const timeoutMs = positiveInteger('PIXELSTREAM_TIMEOUT_MS', '60000');
-const report = {
-    schemaVersion: reportVersion, sourceCommit, browser: browserName,
-    requirements: { ...expected, rejoins }, sessions: [], success: false
-};
 
-class SmokeFailure extends Error {}
+report.requirements = { ...expected, rejoins };
+
+
 let builder = new Builder();
 if (browserName === 'chromium') {
     const options = new chrome.Options().setPageLoadStrategy('eager')
@@ -85,9 +91,7 @@ async function join(driver) {
     throw new SmokeFailure(reason);
 }
 
-let driver;
-let phase = 'driver startup';
-try {
+phase = 'driver startup';
     driver = await builder.build();
     await driver.manage().setTimeouts({ pageLoad: 10000, script: timeoutMs + 10000 });
     const capabilities = await driver.getCapabilities();

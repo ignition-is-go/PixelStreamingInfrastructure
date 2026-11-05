@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import vm from 'node:vm';
+import { requirePlayback } from './production-h264-policy.mjs';
 import { mediaSnapshot } from './production-h264-snapshot.mjs';
 
 test('uses received media rather than the empty SDP SSRC seen in a real browser', async () => {
@@ -8,8 +9,11 @@ test('uses received media rather than the empty SDP SSRC seen in a real browser'
         ['empty', { type: 'inbound-rtp', kind: 'video', framesDecoded: 0, bytesReceived: 0 }],
         ['video', {
             type: 'inbound-rtp', kind: 'video', codecId: 'video-codec', transportId: 'transport',
-            framesDecoded: 8, bytesReceived: 10000
+            trackIdentifier: 'rendered-track', framesDecoded: 8, bytesReceived: 10000
         }],
+        ['unrendered', { type: 'inbound-rtp', kind: 'video', codecId: 'other-codec',
+            trackIdentifier: 'other-track', framesDecoded: 900, bytesReceived: 1000000, lastPacketReceivedTimestamp: 999 }],
+        ['other-codec', { mimeType: 'video/H264' }],
         ['audio', {
             type: 'inbound-rtp', kind: 'audio', codecId: 'audio-codec',
             bytesReceived: 100, packetsReceived: 5, totalSamplesReceived: 48000
@@ -30,7 +34,7 @@ test('uses received media rather than the empty SDP SSRC seen in a real browser'
     };
     const peer = {
         connectionState: 'connected',
-        getReceivers: () => [{ track: { id: 'rendered-track' } }],
+        getReceivers: () => [{ track: { id: 'rendered-track' }, getStats: async () => new Map([...reports].filter(([id]) => !['unrendered', 'other-codec'].includes(id))) }],
         getStats: async () => reports
     };
     const sample = await vm.runInNewContext('(' + mediaSnapshot.toString() + ')()', {
@@ -39,6 +43,8 @@ test('uses received media rather than the empty SDP SSRC seen in a real browser'
         MediaStream, setTimeout, clearTimeout
     });
     assert.equal(sample.video.codec, 'video/VP9');
+    assert.equal(sample.video.track, 'rendered-track');
+    assert.throws(() => requirePlayback(sample, sample, {}), /not H264/);
     assert.equal(sample.video.decoded, 8);
     assert.equal(sample.audio.samples, 48000);
     assert.equal(sample.protocols.join(','), 'udp,udp');
