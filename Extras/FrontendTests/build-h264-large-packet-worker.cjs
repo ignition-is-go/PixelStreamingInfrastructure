@@ -6,7 +6,7 @@ const {createHash} = require('node:crypto');
 
 // Build an isolated experiment. Never modify the installed dependency or its worker.
 const source = path.dirname(require.resolve('mediasoup/package.json'));
-const directory = mkdtempSync(path.join(tmpdir(), 'mediasoup-h264-tcp-'));
+const directory = mkdtempSync(path.join(tmpdir(), 'mediasoup-h264-large-packet-'));
 cpSync(source, directory, {recursive: true});
 const constants = path.join(directory, 'worker/include/RTC/Consts.hpp');
 let text = readFileSync(constants, 'utf8');
@@ -32,7 +32,7 @@ const result = process.platform === 'linux'
 if (result.error) throw result.error;
 if (result.status !== 0) throw new Error(`Worker build failed: ${result.status}`);
 const binary = path.join(directory, 'worker/out/Release/mediasoup-worker');
-writeFileSync(path.join(path.dirname(binary), 'h264-tcp-build.json'), JSON.stringify({
+writeFileSync(path.join(path.dirname(binary), 'h264-large-packet-build.json'), JSON.stringify({
     mediasoupVersion: JSON.parse(readFileSync(path.join(source, 'package.json'), 'utf8')).version,
     rtpCapacity:1900, rtcpCapacityUnchanged:true,
     binarySha256:createHash('sha256').update(readFileSync(binary)).digest('hex')

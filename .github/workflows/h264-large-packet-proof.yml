@@ -1,12 +1,12 @@
-name: Prove larger H264 packets over TCP
+name: Prove larger H264 packets over UDP
 
 on:
   workflow_dispatch:
   pull_request:
     paths:
-      - '.github/workflows/h264-tcp-packet-proof.yml'
-      - 'Extras/FrontendTests/build-h264-tcp-worker.cjs'
-      - 'Extras/FrontendTests/h264-tcp-bench.cjs'
+      - '.github/workflows/h264-large-packet-proof.yml'
+      - 'Extras/FrontendTests/build-h264-large-packet-worker.cjs'
+      - 'Extras/FrontendTests/h264-large-packet-bench.cjs'
       - 'Extras/FrontendTests/h264-profile-probe.cjs'
       - 'Extras/FrontendTests/h264-profile-rtp.cjs'
       - 'Extras/FrontendTests/h264-profile-shipping.cjs'
@@ -15,7 +15,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: h264-tcp-packet-proof-${{ github.ref }}
+  group: h264-large-packet-proof-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -39,21 +39,22 @@ jobs:
           TMPDIR: ${{ runner.temp }}
         run: |
           set -o pipefail
-          node Extras/FrontendTests/build-h264-tcp-worker.cjs | tee "$RUNNER_TEMP/h264-tcp-worker-build.log"
-      - name: Require identical encoded bytes to decode with larger TCP packets
+          node Extras/FrontendTests/build-h264-large-packet-worker.cjs | tee "$RUNNER_TEMP/h264-large-packet-worker-build.log"
+      - name: Require identical encoded bytes to decode with larger UDP packets
         env:
           TMPDIR: ${{ runner.temp }}
           H264_PROFILE_BROWSER_MODE: shipping
+          H264_PACKET_TRANSPORT: udp
         run: |
           set -o pipefail
-          node Extras/FrontendTests/h264-tcp-bench.cjs | tee "$RUNNER_TEMP/h264-tcp-proof.log"
+          node Extras/FrontendTests/h264-large-packet-bench.cjs | tee "$RUNNER_TEMP/h264-large-packet-proof.log"
       - name: Upload proof and build logs
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: h264-tcp-packet-proof
+          name: h264-large-packet-proof
           path: |
-            ${{ runner.temp }}/h264-tcp-worker-build.log
-            ${{ runner.temp }}/h264-tcp-proof.log
-            ${{ runner.temp }}/h264-tcp-bench-*/report.json
+            ${{ runner.temp }}/h264-large-packet-worker-build.log
+            ${{ runner.temp }}/h264-large-packet-proof.log
+            ${{ runner.temp }}/h264-large-packet-bench-*/report.json
           retention-days: 14

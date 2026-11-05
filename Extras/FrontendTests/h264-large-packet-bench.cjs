@@ -7,13 +7,15 @@ const {nalUnits, packetize} = require('./h264-profile-rtp.cjs');
 const {probeBrowsers} = require('./h264-profile-probe.cjs');
 
 async function main() {
-    if (!process.env.MEDIASOUP_WORKER_BIN) throw new Error('Build and select the isolated TCP worker first');
-    const workerBuild = JSON.parse(readFileSync(path.join(path.dirname(process.env.MEDIASOUP_WORKER_BIN), 'h264-tcp-build.json')));
+    if (!process.env.MEDIASOUP_WORKER_BIN) throw new Error('Build and select the isolated larger-packet worker first');
+    const transportProtocol = process.env.H264_PACKET_TRANSPORT ?? 'udp';
+    if (!['udp', 'tcp'].includes(transportProtocol)) throw new Error('H264_PACKET_TRANSPORT must be udp or tcp');
+    const workerBuild = JSON.parse(readFileSync(path.join(path.dirname(process.env.MEDIASOUP_WORKER_BIN), 'h264-large-packet-build.json')));
     if (workerBuild.rtpCapacity !== 1900 || workerBuild.binarySha256 !==
         createHash('sha256').update(readFileSync(process.env.MEDIASOUP_WORKER_BIN)).digest('hex')) {
         throw new Error('Worker does not match the isolated larger-packet build receipt');
     }
-    const directory = mkdtempSync(path.join(tmpdir(), 'h264-tcp-bench-'));
+    const directory = mkdtempSync(path.join(tmpdir(), 'h264-large-packet-bench-'));
     const fixtures = [];
     const files = [];
     for (const [name, filter, qp] of [
@@ -38,12 +40,13 @@ async function main() {
             fixtures.push({file, fixture:`${name}-mtu-${rtpMtu}`, profile:'baseline', profileLevelId, rtpMtu});
         }
     }
-    const browsers = await probeBrowsers(fixtures, {transportProtocol:'tcp'});
-    const report = {productionQualified:false, files, browsers, workerBuild,
+    const browsers = await probeBrowsers(fixtures, {transportProtocol});
+    const report = {productionQualified:false, transportProtocol, files, browsers, workerBuild,
         worker:process.env.MEDIASOUP_WORKER_BIN,
         limits:['Synthetic libx264 frames, not actual Unreal/NVENC qualification',
             'Repeated IDRs at two fps, not sustained 4K30 or loss/latency acceptance',
-            'Larger packets require TCP on every network leg; UDP remains unqualified',
+            'UDP packets above path MTU require fragmentation; loopback does not qualify real paths',
+            'TCP is diagnostic only and does not meet the production UDP requirement',
             'RTP is packetized before mediasoup input; production repacketization remains separate']};
     const destination = path.join(directory, 'report.json');
     writeFileSync(destination, `${JSON.stringify(report, null, 2)}\n`);
@@ -56,8 +59,8 @@ async function main() {
         for (const fixture of fixtures) {
             const outcome = browser.cases.find(outcome => outcome.fixture === fixture.fixture);
             const expected = fixture.fixture === 'large-mtu-1400' ? 'no-decoded-frame' : 'decoded';
-            if (outcome?.status !== expected || outcome.selectedTuple?.protocol !== 'tcp' || outcome.sendError) {
-                throw new Error(`${name} ${fixture.fixture}: expected ${expected} over TCP`);
+            if (outcome?.status !== expected || outcome.selectedTuple?.protocol !== transportProtocol || outcome.sendError) {
+                throw new Error(`${name} ${fixture.fixture}: expected ${expected} over ${transportProtocol}`);
             }
         }
     }
