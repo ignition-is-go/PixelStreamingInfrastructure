@@ -87,7 +87,8 @@ async function main() {
     if (baseline?.status !== 'decoded') {
         throw new Error('Characterization harness failed its small 4K Baseline positive control; inspect report.json');
     }
-    if (report.browsers.some(browser => browser.cases.some(result => result.status === 'error'))) {
+    if (report.browsers.some(browser => browser.cases.some(result =>
+        result.status === 'error' || result.status === 'transport-not-connected'))) {
         throw new Error('Characterization encountered a transport/harness error; inspect report.json');
     }
     if (report.browserMode === 'shipping' && report.browsers.some(browser => browser.status !== 'completed' ||

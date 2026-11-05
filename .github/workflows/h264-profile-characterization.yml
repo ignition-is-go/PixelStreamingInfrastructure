@@ -13,6 +13,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: h264-profile-characterization-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   characterize:
     strategy:

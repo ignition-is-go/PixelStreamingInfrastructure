@@ -1,4 +1,5 @@
 const { readFileSync } = require('node:fs');
+const { networkInterfaces } = require('node:os');
 const { setTimeout: delay } = require('node:timers/promises');
 const { nalUnits, packetize } = require('./h264-profile-rtp.cjs');
 const mediasoup = require('mediasoup');
@@ -6,7 +7,7 @@ const bridge = require('@epicgames-ps/mediasoup-sdp-bridge');
 const playwright = require('playwright');
 const { launchShipping } = require('./h264-profile-shipping.cjs');
 
-async function decode(page, worker, fixture) {
+async function decode(page, worker, fixture, bindIp) {
     let router, sending;
     let stopping = false;
     try {
@@ -24,7 +25,7 @@ async function decode(page, worker, fixture) {
             encodings: [{ssrc: 42}]
         } });
         const transport = await router.createWebRtcTransport({
-            listenInfos: [{protocol: 'udp', ip: '127.0.0.1'}],
+            listenInfos: [{protocol: 'udp', ip: bindIp}],
             initialAvailableOutgoingBitrate: 200000000
         });
         const consumer = await transport.consume({producerId: producer.id,
@@ -75,20 +76,32 @@ async function decode(page, worker, fixture) {
         while (Date.now() < deadline) {
             decoded = await page.evaluate(async () => {
                 const stats = await window.probePeer.getStats();
-                return [...stats.values()].some(s => s.type === 'inbound-rtp' && s.kind === 'video' &&
-                    s.framesDecoded >= 2 && s.frameWidth === 3840 && s.frameHeight === 2160);
+                const video = document.querySelector('video');
+                const frames = video.getVideoPlaybackQuality?.().totalVideoFrames ?? video.webkitDecodedFrameCount ?? 0;
+                return video.videoWidth === 3840 && video.videoHeight === 2160 && (frames >= 2 ||
+                    [...stats.values()].some(s => s.type === 'inbound-rtp' && s.framesDecoded >= 2));
             });
             if (decoded || sendError) break;
             await delay(100);
         }
         const stats = await page.evaluate(async () => {
             const stats = await window.probePeer.getStats();
-            return [...stats.values()].filter(s => s.type === 'inbound-rtp' && s.kind === 'video')
+            return [...stats.values()].filter(s => s.type === 'inbound-rtp' &&
+                (s.kind === 'video' || s.mediaType === 'video' || typeof s.framesDecoded === 'number'))
                 .map(s => ({framesDecoded:s.framesDecoded, framesReceived:s.framesReceived,
                     width:s.frameWidth, height:s.frameHeight, packetsReceived:s.packetsReceived,
                     packetsLost:s.packetsLost, pliCount:s.pliCount}));
         });
-        return { fixture: fixture.fixture, profile: fixture.profile, status: decoded ? 'decoded' : 'no-decoded-frame',
+        const connection = await page.evaluate(() => ({state: window.probePeer.connectionState,
+            ice: window.probePeer.iceConnectionState, gathering: window.probePeer.iceGatheringState}));
+        const playback = await page.evaluate(() => {
+            const video = document.querySelector('video');
+            return {width: video.videoWidth, height: video.videoHeight, currentTime: video.currentTime,
+                renderedFrames: video.getVideoPlaybackQuality?.().totalVideoFrames ?? video.webkitDecodedFrameCount ?? 0};
+        });
+        return { fixture: fixture.fixture, profile: fixture.profile,
+            status: decoded ? 'decoded' : connection.state === 'connected' ? 'no-decoded-frame' : 'transport-not-connected',
+            connection, playback,
             stats, maxMeasuredPackets: frames.length ? Math.max(...frames.map(f => f.packets)) : null,
             completedRtpFrames: frames.length, sendError: sendError || null };
     } catch (error) {
@@ -104,6 +117,11 @@ async function decode(page, worker, fixture) {
 async function probeBrowsers(fixtures) {
     const results = [];
     const shipping = process.env.H264_PROFILE_BROWSER_MODE === 'shipping';
+    // Firefox excludes loopback ICE candidates by default. Use this host's normal
+    // interface instead of changing browser security/ICE preferences for the test.
+    const bindIp = Object.values(networkInterfaces()).flat()
+        .find(address => address.family === 'IPv4' && !address.internal)?.address;
+    if (!bindIp) throw new Error('A local non-loopback IPv4 interface is required');
     const worker = await mediasoup.createWorker({logLevel: 'error'});
     try {
         for (const browserName of shipping ? ['chromium', 'firefox', 'safari'] : ['chromium', 'firefox', 'webkit']) {
@@ -120,7 +138,7 @@ async function probeBrowsers(fixtures) {
                     .filter(c => c.mimeType.toLowerCase() === 'video/h264').map(c => c.sdpFmtpLine) ?? []);
                 if (!result.h264Capabilities.length) { result.status = 'h264-unavailable'; continue; }
                 for (const fixture of fixtures) {
-                    const outcome = await decode(page, worker, fixture);
+                    const outcome = await decode(page, worker, fixture, bindIp);
                     result.cases.push(outcome);
                     console.log(JSON.stringify({browser: browserName, ...outcome}));
                 }

@@ -1,6 +1,7 @@
 const {Builder} = require('selenium-webdriver');
 const chrome = require('selenium-webdriver/chrome');
 const firefox = require('selenium-webdriver/firefox');
+const {createServer} = require('node:http');
 
 async function launchShipping(browserName) {
     let builder = new Builder().forBrowser(browserName === 'chromium' ? 'chrome' : browserName);
@@ -11,9 +12,21 @@ async function launchShipping(browserName) {
         builder = builder.setFirefoxOptions(new firefox.Options().addArguments('-headless'));
     }
     const driver = await builder.build();
+    const server = createServer((_request, response) => {
+        response.writeHead(200, {'Content-Type': 'text/html'});
+        response.end('<!doctype html><html><body></body></html>');
+    });
+    async function close() {
+        try { await driver.quit(); }
+        finally { await new Promise(resolve => server.close(resolve)); }
+    }
     try {
+        await new Promise((resolve, reject) => {
+            server.once('error', reject);
+            server.listen(0, '127.0.0.1', resolve);
+        });
         await driver.manage().setTimeouts({script: 15000, pageLoad: 15000});
-        await driver.get('about:blank');
+        await driver.get(`http://127.0.0.1:${server.address().port}/`);
         const capabilities = await driver.getCapabilities();
         return {
             version: () => capabilities.get('browserVersion'),
@@ -30,10 +43,10 @@ async function launchShipping(browserName) {
                     return result.value;
                 }
             }),
-            close: () => driver.quit()
+            close
         };
     } catch (error) {
-        await driver.quit();
+        await close();
         throw error;
     }
 }
