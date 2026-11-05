@@ -1,5 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 import type { IncomingMessage } from 'http';
+import type { StreamProducerDeclaration } from '@ignition-is-go/pulse-pixelstreaming-protocol-types';
+import { readStreamProducer } from './StreamProducerDeclaration';
 import WebSocket from 'ws';
 import {
     ITransport,
@@ -41,6 +43,7 @@ export class StreamerConnection extends EventEmitter implements IStreamer, LogUt
     remoteAddress?: string;
     // The HTTP upgrade request that opened this connection, if available.
     request?: IncomingMessage;
+    readonly producer?: StreamProducerDeclaration;
     // The max number of subscribed players at a time.
     maxSubscribers: number;
     // A list of all the current subscribed players.
@@ -66,6 +69,7 @@ export class StreamerConnection extends EventEmitter implements IStreamer, LogUt
         this.streaming = false;
         this.remoteAddress = remoteAddress;
         this.request = request;
+        this.producer = readStreamProducer(request, 'unreal');
         this.maxSubscribers = 0;
         this.subscribers = new Set();
 

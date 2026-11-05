@@ -16,6 +16,7 @@ export function streamInventory(registry: StreamerRegistry): StreamInventorySnap
             .map(
                 (streamer): StreamEndpoint => ({
                     streamerId: streamer.streamerId,
+                    ...(streamer.producer ? { producer: streamer.producer } : {}),
                     ...(streamer instanceof SFUConnection && streamer.feed ? { feed: streamer.feed } : {}),
                     producerKind: streamer instanceof SFUConnection ? 'sfu' : 'streamer',
                     availableToPlayers: available.has(streamer),

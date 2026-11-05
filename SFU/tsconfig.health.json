@@ -10,6 +10,7 @@
         "skipLibCheck": true
     },
     "files": [
-        "health.js"
+        "health.js",
+        "producer_identity.js"
     ]
 }
