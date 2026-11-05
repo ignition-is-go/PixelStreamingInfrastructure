@@ -59,7 +59,7 @@ async function decode(page, worker, fixture, bindIp) {
         sending = (async () => {
             let sequence = 1000, timestamp = 90000;
             while (!stopping) {
-                const frame = packetize(nals, {sequence, timestamp});
+                const frame = packetize(nals, {sequence, timestamp, mtu: fixture.rtpMtu ?? 1400});
                 for (const [index, packet] of frame.packets.entries()) {
                     if (stopping) return;
                     producer.send(packet);

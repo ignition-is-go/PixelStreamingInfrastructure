@@ -43,6 +43,12 @@ installed Chrome, Firefox, and Safari, and fails if any cannot decode the small
 4K Baseline positive control. The CI workflow runs both portable Linux and
 shipping macOS characterization without production credentials.
 
+Two additional Baseline controls reuse the exact encoded pattern frame with
+320-byte and 240-byte RTP MTUs. They vary packet count across the assembly
+budget without changing encoded image bytes or quality. These are diagnostic
+fragmentation controls, not proposed production MTUs; reports record actual
+packet counts and decode outcomes rather than assuming a shared browser limit.
+
 Fixtures and `report.json` are written to a new temporary directory printed as
 `REPORT=...`. The CI workflow uploads only the report and command log. A small
 4K Baseline fixture must actually decode in Chromium for the harness to pass its

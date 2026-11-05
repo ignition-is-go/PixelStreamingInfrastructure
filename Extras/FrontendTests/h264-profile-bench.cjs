@@ -64,6 +64,12 @@ async function main() {
             console.log(JSON.stringify(entry));
         }
     }
+    // Hold the encoded image constant while crossing the packet assembly budget.
+    const control = cases.find(entry => entry.fixture === 'pattern' && entry.profile === 'baseline');
+    for (const [fixture, rtpMtu] of [['fragmented-control-below', 320], ['fragmented-control-above', 240]]) {
+        cases.push({...control, fixture, rtpMtu, encodedBytesIdenticalTo: 'pattern/baseline',
+            ...describeFrame(control.file, rtpMtu)});
+    }
     const report = {
         schema: 'h264-offline-profile-bench/v1',
         productionQualified: false,
