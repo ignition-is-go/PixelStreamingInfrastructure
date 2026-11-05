@@ -7,7 +7,7 @@ const bridge = require('@epicgames-ps/mediasoup-sdp-bridge');
 const playwright = require('playwright');
 const { launchShipping } = require('./h264-profile-shipping.cjs');
 
-async function decode(page, worker, fixture, bindIp) {
+async function decode(page, worker, fixture, bindIp, transportProtocol) {
     let router, sending;
     let stopping = false;
     try {
@@ -25,7 +25,7 @@ async function decode(page, worker, fixture, bindIp) {
             encodings: [{ssrc: 42}]
         } });
         const transport = await router.createWebRtcTransport({
-            listenInfos: [{protocol: 'udp', ip: bindIp}],
+            listenInfos: [{protocol: transportProtocol, ip: bindIp}],
             initialAvailableOutgoingBitrate: 200000000
         });
         const consumer = await transport.consume({producerId: producer.id,
@@ -101,7 +101,7 @@ async function decode(page, worker, fixture, bindIp) {
         });
         return { fixture: fixture.fixture, profile: fixture.profile,
             status: decoded ? 'decoded' : connection.state === 'connected' ? 'no-decoded-frame' : 'transport-not-connected',
-            connection, playback,
+            connection, selectedTuple: transport.iceSelectedTuple, playback,
             stats, maxMeasuredPackets: frames.length ? Math.max(...frames.map(f => f.packets)) : null,
             completedRtpFrames: frames.length, sendError: sendError || null };
     } catch (error) {
@@ -114,7 +114,7 @@ async function decode(page, worker, fixture, bindIp) {
     }
 }
 
-async function probeBrowsers(fixtures) {
+async function probeBrowsers(fixtures, {transportProtocol = 'udp'} = {}) {
     const results = [];
     const shipping = process.env.H264_PROFILE_BROWSER_MODE === 'shipping';
     // Firefox excludes loopback ICE candidates by default. Use this host's normal
@@ -138,7 +138,7 @@ async function probeBrowsers(fixtures) {
                     .filter(c => c.mimeType.toLowerCase() === 'video/h264').map(c => c.sdpFmtpLine) ?? []);
                 if (!result.h264Capabilities.length) { result.status = 'h264-unavailable'; continue; }
                 for (const fixture of fixtures) {
-                    const outcome = await decode(page, worker, fixture, bindIp);
+                    const outcome = await decode(page, worker, fixture, bindIp, transportProtocol);
                     result.cases.push(outcome);
                     console.log(JSON.stringify({browser: browserName, ...outcome}));
                 }
