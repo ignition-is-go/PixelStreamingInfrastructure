@@ -42,6 +42,11 @@ This is a local-path browser test. It does not qualify IP fragmentation on a
 `H264_PACKET_TRANSPORT=tcp` only to repeat the earlier diagnostic comparison.
 TCP does not satisfy the production UDP requirement.
 
+The SFU image accepts `--build-arg H264_RTP_CAPACITY=1900` to build and install the
+same worker inside its runtime base image. The default remains 1500. The opt-in
+image contains the worker hash receipt and patched capacity header. Use it only
+for the dedicated canary until the actual UDP paths are qualified.
+
 ## Remaining production work
 
 This experiment packetizes before mediasoup input. Raising the worker capacity

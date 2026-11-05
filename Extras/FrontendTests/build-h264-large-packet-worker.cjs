@@ -1,10 +1,10 @@
-const {cpSync, existsSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync, appendFileSync} = require('node:fs');
+const {cpSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync, appendFileSync} = require('node:fs');
 const {tmpdir} = require('node:os');
 const path = require('node:path');
 const {spawnSync} = require('node:child_process');
 const {createHash} = require('node:crypto');
 
-// Build an isolated experiment. Never modify the installed dependency or its worker.
+// The default build is isolated. --install is used only by the opt-in SFU image build.
 const source = path.dirname(require.resolve('mediasoup/package.json'));
 const directory = mkdtempSync(path.join(tmpdir(), 'mediasoup-h264-large-packet-'));
 cpSync(source, directory, {recursive: true});
@@ -18,6 +18,7 @@ for (const [before, after] of [
     text = text.replace(before, after);
 }
 writeFileSync(constants, text);
+mkdirSync(path.join(directory, 'node_modules'), {recursive:true});
 for (const name of ['node-fetch', 'tar']) {
     const target = path.join(directory, 'node_modules', name);
     if (!existsSync(target)) symlinkSync(path.resolve(__dirname, '../../node_modules', name), target, 'dir');
@@ -32,10 +33,21 @@ const result = process.platform === 'linux'
 if (result.error) throw result.error;
 if (result.status !== 0) throw new Error(`Worker build failed: ${result.status}`);
 const binary = path.join(directory, 'worker/out/Release/mediasoup-worker');
-writeFileSync(path.join(path.dirname(binary), 'h264-large-packet-build.json'), JSON.stringify({
+const receipt = path.join(path.dirname(binary), 'h264-large-packet-build.json');
+writeFileSync(receipt, JSON.stringify({
     mediasoupVersion: JSON.parse(readFileSync(path.join(source, 'package.json'), 'utf8')).version,
     rtpCapacity:1900, rtcpCapacityUnchanged:true,
     binarySha256:createHash('sha256').update(readFileSync(binary)).digest('hex')
 }));
-console.log(`MEDIASOUP_WORKER_BIN=${binary}`);
-if (process.env.GITHUB_ENV) appendFileSync(process.env.GITHUB_ENV, `MEDIASOUP_WORKER_BIN=${binary}\n`);
+let selectedBinary = binary;
+if (process.argv.includes('--install')) {
+    const installed = path.join(source, 'worker/out/Release/mediasoup-worker');
+    copyFileSync(binary, installed);
+    copyFileSync(constants, path.join(source, 'worker/include/RTC/Consts.hpp'));
+    copyFileSync(receipt, path.join(path.dirname(installed), 'h264-large-packet-build.json'));
+    selectedBinary = installed;
+    rmSync(directory, {recursive:true, force:true});
+    console.log(`Installed isolated worker into ${installed}`);
+}
+console.log(`MEDIASOUP_WORKER_BIN=${selectedBinary}`);
+if (process.env.GITHUB_ENV) appendFileSync(process.env.GITHUB_ENV, `MEDIASOUP_WORKER_BIN=${selectedBinary}\n`);
