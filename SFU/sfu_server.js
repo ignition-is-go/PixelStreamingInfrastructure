@@ -173,7 +173,7 @@ async function onStreamerList(msg) {
 }
 
 async function onIdentify(msg) {
-    sendSignalling({ type: 'endpointId', id: config.SFUId });
+    sendSignalling({ type: 'endpointId', id: config.SFUId, ...(config.feed ? { feed: config.feed } : {}) });
     sendSignalling({ type: 'listStreamers' });
 }
 

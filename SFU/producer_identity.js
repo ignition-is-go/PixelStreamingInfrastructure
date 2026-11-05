@@ -1,7 +1,7 @@
 const { randomUUID } = require('node:crypto');
 const { hostname } = require('node:os');
 
-/** @type {import('@ignition-is-go/pulse-reporting-types').StreamProducerDeclaration} */
+/** @type {import('@ignition-is-go/pulse-pixelstreaming-protocol-types').StreamProducerDeclaration} */
 const producer = {
     application: 'sfu',
     process: { instanceId: randomUUID(), reportedHost: hostname(), pid: process.pid }

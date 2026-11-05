@@ -1,8 +1,11 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 import type { IncomingMessage } from 'http';
-import type { StreamProducerDeclaration } from '@ignition-is-go/pulse-reporting-types';
+import type {
+    StreamFeed,
+    SfuSignallingStateMessage,
+    StreamProducerDeclaration
+} from '@ignition-is-go/pulse-pixelstreaming-protocol-types';
 import { readStreamProducer } from './StreamProducerDeclaration';
-import type { SfuSignallingStateMessage } from '@ignition-is-go/pulse-reporting-types';
 import { randomUUID } from 'crypto';
 import WebSocket from 'ws';
 import {
@@ -37,6 +40,7 @@ import { SignallingServer } from './SignallingServer';
  */
 export class SFUConnection extends EventEmitter implements IPlayer, IStreamer, LogUtils.IMessageLogger {
     readonly sessionId: string;
+    feed?: StreamFeed;
     // The player id related to this SFU connection.
     playerId: string;
     // The streamer id related to this SFU connection.
@@ -456,7 +460,13 @@ export class SFUConnection extends EventEmitter implements IPlayer, IStreamer, L
         this.sendToStreamer(message);
     }
 
-    private onEndpointId(_message: Messages.endpointId): void {
+    private onEndpointId(message: Messages.endpointId): void {
+        if ('feed' in message) {
+            this.feed = parseStreamFeed(message.feed);
+            if (message.feed !== undefined && !this.feed) {
+                Logger.warn(`SFU ${this.streamerId}: ignoring invalid feed advertisement`);
+            }
+        }
         this.streaming = true;
         this.server.streamerRegistry.notifyChanged();
     }
@@ -475,4 +485,12 @@ export class SFUConnection extends EventEmitter implements IPlayer, IStreamer, L
     private onPingMessage(message: Messages.ping): void {
         this.sendMessage(MessageHelpers.createMessage(Messages.pong, { time: message.time }));
     }
+}
+
+function parseStreamFeed(value: unknown): StreamFeed | undefined {
+    if (typeof value !== 'object' || value === null) return undefined;
+    if (!('id' in value) || typeof value.id !== 'string' || value.id.trim().length === 0) return undefined;
+    if (!('kind' in value) || (value.kind !== 'program' && value.kind !== 'preview')) return undefined;
+    if (!('route' in value) || (value.route !== 'local' && value.route !== 'edge')) return undefined;
+    return { id: value.id, kind: value.kind, route: value.route };
 }

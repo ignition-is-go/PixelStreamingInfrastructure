@@ -1,6 +1,6 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 import type { IncomingMessage } from 'http';
-import type { StreamProducerDeclaration } from '@ignition-is-go/pulse-reporting-types';
+import type { StreamProducerDeclaration } from '@ignition-is-go/pulse-pixelstreaming-protocol-types';
 import { readStreamProducer } from './StreamProducerDeclaration';
 import WebSocket from 'ws';
 import {

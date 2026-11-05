@@ -8,7 +8,7 @@ import {
     EventEmitter
 } from '@epicgames-ps/lib-pixelstreamingcommon-ue5.8';
 import type { IncomingMessage } from 'http';
-import type { StreamProducerDeclaration } from '@ignition-is-go/pulse-reporting-types';
+import type { StreamProducerDeclaration } from '@ignition-is-go/pulse-pixelstreaming-protocol-types';
 import { Logger } from './Logger';
 import { IMessageLogger } from './LoggingUtils';
 import { IPlayerInfo } from './PlayerRegistry';

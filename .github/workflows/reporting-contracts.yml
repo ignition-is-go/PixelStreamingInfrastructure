@@ -1,10 +1,10 @@
-name: Reporting contracts
+name: Protocol contracts
 
 on:
     pull_request:
         paths:
             - '.github/workflows/reporting-contracts.yml'
-            - 'scripts/*reporting-types.mjs'
+            - 'scripts/*protocol-types.mjs'
             - 'vendor/**'
             - 'SFU/**'
             - 'Signalling/**'
@@ -30,7 +30,7 @@ jobs:
               with:
                   node-version-file: NODE_VERSION
             - name: Test offline archive verification
-              run: node scripts/test-reporting-types.mjs
+              run: node scripts/test-protocol-types.mjs
             - uses: dtolnay/rust-toolchain@stable
             - uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3
               id: reporting
@@ -49,7 +49,7 @@ jobs:
                   export GIT_CONFIG_COUNT=1
                   export GIT_CONFIG_KEY_0=http.https://github.com/ignition-is-go/pulse-reporting.git.extraheader
                   export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $authorization"
-                  node scripts/update-reporting-types.mjs --check-source
+                  node scripts/update-protocol-types.mjs --check-source
 
     containers:
         runs-on: ubuntu-latest

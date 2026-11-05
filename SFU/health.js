@@ -1,6 +1,6 @@
 /**
- * @typedef {import('@ignition-is-go/pulse-reporting-types').SfuHealth} SfuHealth
- * @typedef {import('@ignition-is-go/pulse-reporting-types').MediaHealth} MediaHealth
+ * @typedef {import('@ignition-is-go/pulse-pixelstreaming-protocol-types').SfuHealth} SfuHealth
+ * @typedef {import('@ignition-is-go/pulse-pixelstreaming-protocol-types').MediaHealth} MediaHealth
  * @typedef {import('mediasoup').types.Producer} Producer
  * @typedef {import('mediasoup').types.Consumer} Consumer
  * @typedef {Pick<Producer, 'id' | 'kind' | 'paused'> & Partial<Pick<Consumer, 'producerPaused'>> & { getStats: Consumer['getStats'] }} ObservedMedia

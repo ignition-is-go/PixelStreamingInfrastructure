@@ -1,6 +1,6 @@
-# Reporting contracts
+# Pixel Streaming protocol contracts
 
-`pulse-reporting-types.tgz` is the npm package generated from the private
+`pulse-pixelstreaming-protocol-types.tgz` is the npm package generated from the private
 `ignition-is-go/pulse-reporting` repository. The accompanying source metadata
 records its exact commit and SHA-256 checksum. npm's lockfile also pins the
 archive integrity.
@@ -13,9 +13,9 @@ truth; do not edit or rebuild the declarations by hand.
 To update it, use an account with read access to the source repository:
 
 ```sh
-node scripts/update-reporting-types.mjs <full-commit-sha>
-node scripts/update-reporting-types.mjs --check
-node scripts/update-reporting-types.mjs --check-source
+node scripts/update-protocol-types.mjs <full-commit-sha>
+node scripts/update-protocol-types.mjs --check
+node scripts/update-protocol-types.mjs --check-source
 npm ci
 npm test --workspace SFU
 npm run build:cjs --workspace Common

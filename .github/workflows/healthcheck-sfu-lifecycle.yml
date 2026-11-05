@@ -6,8 +6,11 @@ on:
         paths:
             - '.github/workflows/healthcheck-sfu-lifecycle.yml'
             - 'SFU/**'
+            - 'Extras/FrontendTests/h264-compat.config.ts'
+            - 'Extras/FrontendTests/tests/h264-baseline-compat.spec.ts'
+            - 'Extras/FrontendTests/tests/h264-firefox-release.mjs'
             - 'vendor/**'
-            - 'scripts/update-reporting-types.mjs'
+            - 'scripts/update-protocol-types.mjs'
             - 'package-lock.json'
 
 permissions:
@@ -27,10 +30,52 @@ jobs:
                   cache: npm
 
             - name: Verify reporting contract archive
-              run: node scripts/update-reporting-types.mjs --check
+              run: node scripts/update-protocol-types.mjs --check
 
             - name: Install locked dependencies
-              run: npm ci --workspace=SFU
+              run: npm ci
 
             - name: Test SFU lifecycle races
               run: npm test --workspace SFU
+
+            - name: Install H.264 browser test engines
+              run: npx playwright install --with-deps chromium firefox webkit
+              working-directory: Extras/FrontendTests
+
+            - name: Test H.264 negotiation in portable browser engines
+              run: npm run test:h264
+              working-directory: Extras/FrontendTests
+
+    test-h264-platform-browsers:
+        runs-on: macos-latest
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
+
+            - name: Set up Node.js
+              uses: actions/setup-node@v4
+              with:
+                  node-version-file: NODE_VERSION
+                  cache: npm
+
+            - name: Install browser negotiation test dependencies
+              run: npm ci --workspace=Extras/FrontendTests
+
+            - name: Install Firefox and WebKit
+              run: npx playwright install firefox webkit
+              working-directory: Extras/FrontendTests
+
+            - name: Install shipping Firefox and WebDriver
+              run: |
+                  brew install --cask firefox
+                  brew install geckodriver
+
+            - name: Require H.264 negotiation in shipping Firefox
+              run: npm run test:h264:firefox-release
+              working-directory: Extras/FrontendTests
+
+            - name: Require H.264 decoding in Safari's WebKit engine
+              run: npx playwright test --config h264-compat.config.ts --project webkit
+              working-directory: Extras/FrontendTests
+              env:
+                  REQUIRE_H264: '1'
