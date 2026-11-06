@@ -40,8 +40,9 @@ export function requirePlayback(before, after, expected) {
     requireCondition(decoded / elapsed >= expected.minimumFps, 'H264 decode rate is below the requirement');
     requireCondition(presented / elapsed >= expected.minimumFps, 'video presentation rate is below the requirement');
     requireCondition(
-        after.video.mediaTime - before.video.mediaTime >= elapsed * 0.8,
-        'video playback time did not advance'
+        Number.isFinite(before.video.presentationTime) && Number.isFinite(after.video.presentationTime) &&
+            after.video.presentationTime - before.video.presentationTime >= elapsed * 1000 * 0.8,
+        'video presentation time did not advance'
     );
     requireCondition(after.audio.packets > before.audio.packets, 'audio packets did not advance');
     const samples = after.audio.samples - before.audio.samples;

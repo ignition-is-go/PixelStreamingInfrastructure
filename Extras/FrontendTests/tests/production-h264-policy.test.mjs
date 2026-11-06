@@ -6,7 +6,7 @@ const expected = { width: 3840, height: 2160, seconds: 30, minimumFps: 24 };
 function samples() {
     const before = {
         at: 0, peer: 1, connection: 'connected', protocols: ['udp', 'udp'], relayProtocols: [],
-        video: { track: 'video-track', statsId: 'video-rtp', ssrc: 123, codec: 'video/H264', width: 3840, height: 2160, decoded: 10, presented: 10, mediaTime: 1, freezes: 0 },
+        video: { track: 'video-track', statsId: 'video-rtp', ssrc: 123, codec: 'video/H264', width: 3840, height: 2160, decoded: 10, presented: 10, mediaTime: 1, presentationTime: 1000, freezes: 0 },
         audio: { codec: 'audio/opus', packets: 10, samples: 48000, rate: 48000, concealed: 0 }
     };
     const after = structuredClone(before);
@@ -14,6 +14,7 @@ function samples() {
     after.video.decoded += 900;
     after.video.presented += 900;
     after.video.mediaTime += 30;
+    after.video.presentationTime += 30000;
     after.audio.packets += 30;
     after.audio.samples += 1440000;
     return [before, after];
@@ -31,7 +32,7 @@ for (const [name, change, message] of [
     ['stalled decoder', (s) => { s.video.decoded = 10; }, /decode rate/],
     ['9.6 fps', (s) => { s.video.decoded = 298; }, /decode rate/],
     ['stalled presentation', (s) => { s.video.presented = 10; }, /presentation rate/],
-    ['stalled playback', (s) => { s.video.mediaTime = 1; }, /playback time/],
+    ['stalled presentation clock', (s) => { s.video.presentationTime = 1000; }, /presentation time/],
     ['live audio track without packets', (s) => { s.audio.packets = 10; }, /audio packets/],
     ['audio without decoded samples', (s) => { s.audio.samples = 48000; }, /audio samples/],
     ['missing audio decode evidence', (s) => { s.audio.samples = null; }, /counter is unavailable/],
@@ -49,3 +50,9 @@ for (const [name, change, message] of [
         assert.throws(() => requirePlayback(before, after, expected), message);
     });
 }
+
+test('accepts live Firefox frames with a zero media timeline and advancing presentation clock', () => {
+    const [before, after] = samples();
+    before.video.mediaTime = after.video.mediaTime = 0;
+    assert.equal(requirePlayback(before, after, expected).decoded, 900);
+});

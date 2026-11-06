@@ -63,6 +63,7 @@ export async function mediaSnapshot() {
             decoded: videoStats.framesDecoded ?? null,
             presented: metadata.presentedFrames,
             mediaTime: metadata.mediaTime,
+            presentationTime: metadata.presentationTime,
             freezes: videoStats.freezeCount ?? null,
             dropped: videoStats.framesDropped ?? null
         },
@@ -81,7 +82,7 @@ export async function mediaDiagnostics() {
     const codecs = (sdp) => (sdp ?? '').split(/\r?\n/).filter((line) =>
         /^(m=(audio|video) |a=(rtpmap|fmtp|sendonly|recvonly|inactive|sendrecv)(:|$))/.test(line));
     const peers = [];
-    for (const peer of window.__pixelstreamSmokePeers ?? []) {
+    for (const peer of (window.__pixelstreamSmokePeers ?? []).filter((item) => item.connectionState !== 'closed')) {
         const stats = await peer.getStats();
         peers.push({
             connection: peer.connectionState, ice: peer.iceConnectionState,
@@ -95,5 +96,6 @@ export async function mediaDiagnostics() {
             }))
         });
     }
-    return { receiverCodecs: RTCRtpReceiver.getCapabilities('video')?.codecs, peers };
+    return { receiverCodecs: typeof RTCRtpReceiver.getCapabilities === 'function'
+        ? RTCRtpReceiver.getCapabilities('video')?.codecs : null, peers };
 }

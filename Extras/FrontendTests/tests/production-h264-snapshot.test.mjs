@@ -74,3 +74,13 @@ test('failure diagnostics retain codec rejection without endpoint or ICE secrets
     assert.match(encoded, /m=video 0/);
     assert.doesNotMatch(encoded, /secret|192\.0\.2/);
 });
+
+test('failure diagnostics survive closed peers and an unavailable capabilities API', async () => {
+    const { mediaDiagnostics } = await import('./production-h264-snapshot.mjs');
+    const result = await vm.runInNewContext('(' + mediaDiagnostics.toString() + ')()', {
+        RTCRtpReceiver: {}, window: { __pixelstreamSmokePeers: [{ connectionState: 'closed',
+            getStats: async () => { throw new Error('closed Firefox peer'); } }] }
+    });
+    assert.equal(result.receiverCodecs, null);
+    assert.equal(result.peers.length, 0);
+});
