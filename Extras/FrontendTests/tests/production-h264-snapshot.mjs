@@ -27,11 +27,8 @@ export async function mediaSnapshot() {
     const audioStats = active('audio');
     if (!videoStats || !audioStats) throw new Error('video and audio RTP statistics are not ready');
     const transport = reports.get(videoStats.transportId);
-    const pair = reports.get(transport?.selectedCandidatePairId) ??
-        [...reports.values()].find(
-            (item) => item.type === 'candidate-pair' && item.state === 'succeeded' &&
-                (item.selected || item.nominated)
-        );
+    const pair = reports.get(transport?.selectedCandidatePairId);
+    if (!transport || !pair) throw new Error('rendered video transport has no selected candidate pair');
     const candidates = pair
         ? [reports.get(pair.localCandidateId), reports.get(pair.remoteCandidateId)]
         : [];

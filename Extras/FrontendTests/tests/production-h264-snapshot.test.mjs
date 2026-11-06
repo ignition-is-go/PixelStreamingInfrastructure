@@ -48,4 +48,12 @@ test('uses received media rather than the empty SDP SSRC seen in a real browser'
     assert.equal(sample.video.decoded, 8);
     assert.equal(sample.audio.samples, 48000);
     assert.equal(sample.protocols.join(','), 'udp,udp');
+    reports.delete('transport');
+    reports.get('pair').state = 'succeeded';
+    reports.get('pair').nominated = true;
+    await assert.rejects(() => vm.runInNewContext('(' + mediaSnapshot.toString() + ')()', {
+        document: { querySelectorAll: () => [video] },
+        window: { __pixelstreamSmokePeers: [peer] },
+        MediaStream, setTimeout, clearTimeout
+    }), /rendered video transport has no selected candidate pair/);
 });
