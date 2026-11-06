@@ -57,3 +57,20 @@ test('uses received media rather than the empty SDP SSRC seen in a real browser'
         MediaStream, setTimeout, clearTimeout
     }), /rendered video transport has no selected candidate pair/);
 });
+
+test('failure diagnostics retain codec rejection without endpoint or ICE secrets', async () => {
+    const { mediaDiagnostics } = await import('./production-h264-snapshot.mjs');
+    const sdp = 'm=video 0 UDP/TLS/RTP/SAVPF 105\r\na=fmtp:105 profile-level-id=4d001f\r\n' +
+        'c=IN IP4 192.0.2.1\r\na=candidate:secret-address\r\na=ice-pwd:secret-password\r\na=fingerprint:secret-fingerprint\r\n';
+    const result = await vm.runInNewContext('(' + mediaDiagnostics.toString() + ')()', {
+        RTCRtpReceiver: { getCapabilities: () => ({ codecs: [{ mimeType: 'video/H264' }] }) },
+        window: { __pixelstreamSmokePeers: [{
+            connectionState: 'connected', remoteDescription: { sdp }, localDescription: { sdp },
+            getStats: async () => new Map([['candidate', { type: 'local-candidate', address: '192.0.2.2' }]])
+        }] }
+    });
+    const encoded = JSON.stringify(result);
+    assert.match(encoded, /profile-level-id=4d001f/);
+    assert.match(encoded, /m=video 0/);
+    assert.doesNotMatch(encoded, /secret|192\.0\.2/);
+});

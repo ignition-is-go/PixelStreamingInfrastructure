@@ -4,7 +4,7 @@ import chrome from 'selenium-webdriver/chrome.js';
 import firefox from 'selenium-webdriver/firefox.js';
 import safari from 'selenium-webdriver/safari.js';
 import { reportVersion, requireMediaFormat, requirePlayback } from './production-h264-policy.mjs';
-import { mediaSnapshot } from './production-h264-snapshot.mjs';
+import { mediaSnapshot, mediaDiagnostics } from './production-h264-snapshot.mjs';
 
 function requiredEnvironment(name) {
     const value = process.env[name];
@@ -124,6 +124,13 @@ phase = 'driver startup';
     }
     report.success = true;
 } catch (error) {
+    if (driver) {
+        try {
+            report.diagnostics = await driver.executeAsyncScript(
+                'const done = arguments[arguments.length - 1]; (' + mediaDiagnostics.toString() +
+                ')().then(done, () => done({unavailable: true}));');
+        } catch { report.diagnostics = { unavailable: true }; }
+    }
     report.failure = {
         phase,
         message: error instanceof SmokeFailure ? error.message : phase + ' failed before media qualification'

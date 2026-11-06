@@ -75,3 +75,25 @@ export async function mediaSnapshot() {
         }
     };
 }
+
+// Keep failure evidence useful without recording endpoints, ICE credentials or tokens.
+export async function mediaDiagnostics() {
+    const codecs = (sdp) => (sdp ?? '').split(/\r?\n/).filter((line) =>
+        /^(m=(audio|video) |a=(rtpmap|fmtp|sendonly|recvonly|inactive|sendrecv)(:|$))/.test(line));
+    const peers = [];
+    for (const peer of window.__pixelstreamSmokePeers ?? []) {
+        const stats = await peer.getStats();
+        peers.push({
+            connection: peer.connectionState, ice: peer.iceConnectionState,
+            signalling: peer.signalingState,
+            offer: codecs(peer.remoteDescription?.sdp), answer: codecs(peer.localDescription?.sdp),
+            inbound: [...stats.values()].filter((item) => item.type === 'inbound-rtp').map((item) => ({
+                kind: item.kind ?? item.mediaType, track: item.trackIdentifier, ssrc: item.ssrc,
+                codec: stats.get(item.codecId)?.mimeType, decoded: item.framesDecoded,
+                received: item.framesReceived, dropped: item.framesDropped,
+                packets: item.packetsReceived, lost: item.packetsLost, bytes: item.bytesReceived
+            }))
+        });
+    }
+    return { receiverCodecs: RTCRtpReceiver.getCapabilities('video')?.codecs, peers };
+}
