@@ -73,8 +73,12 @@ async function snapshot(driver) {
 }
 
 async function join(driver) {
-    await driver.get('about:blank');
-    await driver.executeScript((url) => window.location.assign(url), viewerUrl);
+    try {
+        await driver.get('about:blank');
+        await driver.get(viewerUrl);
+    } catch {
+        throw new SmokeFailure('browser navigation failed before opening the reference client');
+    }
     const deadline = Date.now() + timeoutMs;
     let reason = 'media did not become ready';
     while (Date.now() < deadline) {
