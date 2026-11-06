@@ -47,8 +47,10 @@ export async function mediaSnapshot() {
         throw new Error('rendered track changed while sampling');
     }
     const audioCodec = reports.get(audioStats.codecId);
+    const playback = video.getVideoPlaybackQuality?.();
     return {
         at: Date.now(),
+        visibility: document.visibilityState ?? null,
         peer: peers.indexOf(peer),
         connection: peer.connectionState,
         protocols: candidates.map((item) => item?.protocol?.toLowerCase() ?? 'unknown'),
@@ -62,6 +64,8 @@ export async function mediaSnapshot() {
             height: video.videoHeight,
             decoded: videoStats.framesDecoded ?? null,
             presented: metadata.presentedFrames,
+            playbackTotal: playback?.totalVideoFrames ?? null,
+            playbackDropped: playback?.droppedVideoFrames ?? null,
             mediaTime: metadata.mediaTime,
             presentationTime: metadata.presentationTime,
             freezes: videoStats.freezeCount ?? null,

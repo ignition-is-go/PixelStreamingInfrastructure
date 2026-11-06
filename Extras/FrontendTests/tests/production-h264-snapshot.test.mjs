@@ -30,6 +30,7 @@ test('uses received media rather than the empty SDP SSRC seen in a real browser'
     }
     const video = {
         srcObject: new MediaStream(), videoWidth: 3840, videoHeight: 2160,
+        getVideoPlaybackQuality: () => ({ totalVideoFrames: 12, droppedVideoFrames: 3 }),
         requestVideoFrameCallback(callback) { queueMicrotask(() => callback(0, { presentedFrames: 9, mediaTime: 0.3 })); }
     };
     const peer = {
@@ -38,7 +39,7 @@ test('uses received media rather than the empty SDP SSRC seen in a real browser'
         getStats: async () => reports
     };
     const sample = await vm.runInNewContext('(' + mediaSnapshot.toString() + ')()', {
-        document: { querySelectorAll: () => [video] },
+        document: { querySelectorAll: () => [video], visibilityState: 'visible' },
         window: { __pixelstreamSmokePeers: [peer] },
         MediaStream, setTimeout, clearTimeout
     });
@@ -46,6 +47,9 @@ test('uses received media rather than the empty SDP SSRC seen in a real browser'
     assert.equal(sample.video.track, 'rendered-track');
     assert.throws(() => requirePlayback(sample, sample, {}), /not H264/);
     assert.equal(sample.video.decoded, 8);
+    assert.equal(sample.video.playbackTotal, 12);
+    assert.equal(sample.video.playbackDropped, 3);
+    assert.equal(sample.visibility, 'visible');
     assert.equal(sample.audio.samples, 48000);
     assert.equal(sample.protocols.join(','), 'udp,udp');
     reports.delete('transport');
