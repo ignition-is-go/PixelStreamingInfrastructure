@@ -1,0 +1,36 @@
+name: H264 media gate regressions
+
+on:
+  pull_request:
+    paths:
+      - Extras/FrontendTests/tests/production-h264-*
+      - Extras/FrontendTests/prepare-production-smoke-client.cjs
+      - Extras/FrontendTests/package.json
+      - .github/workflows/h264-media-gate.yml
+  push:
+    branches: [UE5.8]
+    paths:
+      - Extras/FrontendTests/tests/production-h264-*
+      - Extras/FrontendTests/prepare-production-smoke-client.cjs
+      - Extras/FrontendTests/package.json
+      - .github/workflows/h264-media-gate.yml
+
+permissions:
+  contents: read
+
+jobs:
+  policy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: NODE_VERSION
+      - name: Install locked test dependencies
+        run: npm ci --ignore-scripts
+      - name: Validate the media observer and qualification failures
+        working-directory: Extras/FrontendTests
+        run: |
+          node --check tests/production-h264-smoke.mjs
+          node --check tests/production-h264-snapshot.mjs
+          node --test tests/production-h264-*.test.*
