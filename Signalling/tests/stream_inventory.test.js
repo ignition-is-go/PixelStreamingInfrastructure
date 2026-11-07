@@ -472,3 +472,112 @@ test(
         await observer.next((value) => !value.streams.some((stream) => stream.streamerId === id));
     }
 );
+
+test(
+    'SFU health is attributed to its registered socket process across generations and restarts',
+    { timeout: 15000 },
+    async (t) => {
+        const signalling = {
+            config: {},
+            streamerRegistry: new StreamerRegistry(),
+            playerRegistry: new PlayerRegistry()
+        };
+        const publisher = new StreamInventoryServer(signalling.streamerRegistry, {
+            host: '127.0.0.1',
+            port: 0
+        });
+        await new Promise((resolve) => publisher.server.once('listening', resolve));
+        const observer = await connect(`ws://127.0.0.1:${publisher.server.address().port}`);
+        const connections = [];
+        t.after(async () => {
+            await publisher.close();
+            await Promise.all(connections.map((item) => item.close()));
+        });
+        const source = await connection(signalling, StreamerConnection, 'source');
+        connections.push(source);
+        async function start(declaration) {
+            const sfu = await connection(
+                signalling,
+                SFUConnection,
+                'edge',
+                declaration ? queryFor(declaration) : ''
+            );
+            connections.push(sfu);
+            sfu.socket.send(JSON.stringify({ type: 'subscribe', streamerId: 'source' }));
+            await source.next((message) => message.type === 'playerConnected');
+            const snapshot = await observer.next((value) =>
+                value.streams.some(
+                    (stream) => stream.streamerId === 'edge' && stream.upstreamStreamerId === 'source'
+                )
+            );
+            return { sfu, registered: snapshot.streams.find((stream) => stream.streamerId === 'edge') };
+        }
+        async function forward(current, generation) {
+            const report = {
+                generation,
+                collectedAtMs: 1000,
+                validUntilMs: 4000,
+                iceState: 'completed',
+                dtlsState: 'connected',
+                inputs: [
+                    {
+                        id: 'audio',
+                        kind: 'audio',
+                        paused: false,
+                        samples: [{ ssrc: 42, packets: 12, bytes: 900, bitrate: 8000, packetsLost: -1 }]
+                    },
+                    { id: 'video', kind: 'video', paused: true, error: 'producer paused', samples: [] }
+                ],
+                viewers: [{ playerId: 'viewer', iceState: 'checking', dtlsState: 'new', outputs: [] }],
+                producerProcess: {
+                    instanceId: 'ffffffff-ffff-4fff-8fff-ffffffffffff',
+                    reportedHost: 'forged',
+                    pid: 99
+                }
+            };
+            current.sfu.socket.send(
+                JSON.stringify({
+                    type: 'sfuHealth',
+                    playerId: 'forged',
+                    sfuStreamerId: 'forged',
+                    report: JSON.stringify(report)
+                })
+            );
+            const forwarded = await source.next((message) => message.type === 'sfuHealth');
+            assert.equal(forwarded.playerId, current.sfu.native.playerId);
+            assert.equal(forwarded.sfuStreamerId, 'edge');
+            const received = JSON.parse(forwarded.report);
+            assert.deepEqual(received.producerProcess, current.registered.producer?.process);
+            const { producerProcess: _forged, ...measurements } = report;
+            const { producerProcess: _stamped, ...forwardedMeasurements } = received;
+            assert.deepEqual(forwardedMeasurements, measurements);
+            return received;
+        }
+        const declaration = producer('sfu');
+        let current = await start(declaration);
+        for (const report of ['{', '[]', 'null']) {
+            current.sfu.socket.send(JSON.stringify({ type: 'sfuHealth', report }));
+        }
+        const first = await forward(current, 1);
+        const next = await forward(current, 2);
+        assert.deepEqual(next.producerProcess, first.producerProcess);
+        await current.sfu.close();
+        await observer.next((value) => !value.streams.some((stream) => stream.streamerId === 'edge'));
+        current = await start(declaration);
+        assert.deepEqual((await forward(current, 1)).producerProcess, first.producerProcess);
+        await current.sfu.close();
+        await observer.next((value) => !value.streams.some((stream) => stream.streamerId === 'edge'));
+        current = await start({
+            ...declaration,
+            process: { ...declaration.process, instanceId: '15c080c2-75dc-4d88-b3f7-f7c32cb64a41' }
+        });
+        assert.notEqual(
+            (await forward(current, 1)).producerProcess.instanceId,
+            first.producerProcess.instanceId
+        );
+        await current.sfu.close();
+        await observer.next((value) => !value.streams.some((stream) => stream.streamerId === 'edge'));
+        current = await start();
+        assert.equal(Object.hasOwn(await forward(current, 1), 'producerProcess'), false);
+    }
+);
