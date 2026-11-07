@@ -1,6 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 import type { IncomingMessage } from 'http';
 import type {
+    SfuHealth,
     StreamFeed,
     SfuSignallingStateMessage,
     StreamProducerDeclaration
@@ -189,6 +190,25 @@ export class SFUConnection extends EventEmitter implements IPlayer, IStreamer, L
         this.protocol.on(Messages.offer.typeName, this.sendToPlayer.bind(this));
         this.protocol.on(Messages.answer.typeName, this.sendToStreamer.bind(this));
         this.protocol.on(Messages.sfuHealth.typeName, (message: Messages.sfuHealth) => {
+            try {
+                const report: unknown = JSON.parse(message.report);
+                if (typeof report !== 'object' || report === null || Array.isArray(report)) {
+                    throw new Error('SFU health report must be an object');
+                }
+                const attribution = { producerProcess: this.producer?.process } satisfies Pick<
+                    SfuHealth,
+                    'producerProcess'
+                >;
+                message.report = JSON.stringify({ ...report, ...attribution });
+            } catch (error) {
+                Logger.warn(
+                    `SFU health ignored ${JSON.stringify({
+                        streamerId: this.streamerId,
+                        reason: error instanceof Error ? error.message : String(error)
+                    })}`
+                );
+                return;
+            }
             message.playerId = this.playerId;
             message.sfuStreamerId = this.streamerId;
             this.sendToStreamer(message);
