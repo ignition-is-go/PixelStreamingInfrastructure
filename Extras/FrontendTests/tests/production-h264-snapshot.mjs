@@ -66,6 +66,7 @@ export async function mediaSnapshot() {
             presented: metadata.presentedFrames,
             playbackTotal: playback?.totalVideoFrames ?? null,
             playbackDropped: playback?.droppedVideoFrames ?? null,
+            jitterBufferTarget: receiver.jitterBufferTarget ?? null,
             mediaTime: metadata.mediaTime,
             presentationTime: metadata.presentationTime,
             freezes: videoStats.freezeCount ?? null,

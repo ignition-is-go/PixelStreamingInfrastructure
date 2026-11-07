@@ -9,6 +9,7 @@ test('observer precedes application scripts and preserves the native constructor
     const script = html.match(/<script data-pixelstream-smoke-observer="2">([\s\S]*?)<\/script>/)[1];
     class Native {
         constructor(...args) { this.args = args; }
+        addEventListener(name, callback) { this[name] = callback; }
         static generateCertificate() { return 'native certificate'; }
     }
     const window = { RTCPeerConnection: Native };
@@ -18,6 +19,12 @@ test('observer precedes application scripts and preserves the native constructor
     assert.deepEqual(peer.args, ['configuration', 'constraints']);
     assert.equal(window.RTCPeerConnection.generateCertificate(), 'native certificate');
     assert.equal(window.__pixelstreamSmokePeers[0], peer);
+    const video = { jitterBufferTarget: null };
+    const audio = { jitterBufferTarget: null };
+    peer.track({ track: { kind: 'video' }, receiver: video });
+    peer.track({ track: { kind: 'audio' }, receiver: audio });
+    assert.equal(video.jitterBufferTarget, 200);
+    assert.equal(audio.jitterBufferTarget, null);
     assert.equal(prepare(html), html);
 });
 

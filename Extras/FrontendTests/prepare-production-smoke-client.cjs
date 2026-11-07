@@ -7,6 +7,11 @@ function observePeers() {
         constructor(...args) {
             super(...args);
             window.__pixelstreamSmokePeers.push(this);
+            this.addEventListener('track', ({ track, receiver }) => {
+                if (track.kind === 'video' && 'jitterBufferTarget' in receiver) {
+                    receiver.jitterBufferTarget = 200;
+                }
+            });
         }
     };
 }
