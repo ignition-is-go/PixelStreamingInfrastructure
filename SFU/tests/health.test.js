@@ -55,3 +55,11 @@ test('slow collection does not renew the age of an older sample', async () => {
     finish([row('inbound-rtp', 10)]);
     assert.ok((await pending).collectedAtMs <= issuedAt);
 });
+
+test('receiver report loss preserves positive and signed counts', async () => {
+    for (const [wire, expected] of [[0, 0], [2, 2], [0x7fffff, 0x7fffff], [-1, -1], [0xff800001, -1], [0xff800002, -2], [0xff800000, -0x800000], [0xffffffff, -0x7fffff]]) {
+        const sample = { ...row('outbound-rtp', 10), packetsLost: wire };
+        const result = await collectHealth(upstream(), [{ id: 'viewer', consumers: [media('out', 'video', [sample])] }]);
+        assert.equal(result.viewers[0].outputs[0].samples[0].packetsLost, expected);
+    }
+});
