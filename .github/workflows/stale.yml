@@ -13,7 +13,7 @@ permissions:
 
 jobs:
   stale:
-    runs-on: ubuntu-latest
+    runs-on: {group: ci-untrusted, labels: [self-hosted, Linux, X64, ram-ge-16g, disk-ge-100g]}
     steps:
     - uses: actions/stale@v8
       with:

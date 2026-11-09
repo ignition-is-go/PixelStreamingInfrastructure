@@ -21,7 +21,7 @@ permissions:
 
 jobs:
     generated-source:
-        runs-on: ubuntu-latest
+        runs-on: {group: ci-untrusted, labels: [self-hosted, Linux, X64, ram-ge-16g, disk-ge-100g]}
         steps:
             - uses: actions/checkout@v4
               with:
@@ -52,7 +52,7 @@ jobs:
                   node scripts/update-protocol-types.mjs --check-source
 
     containers:
-        runs-on: ubuntu-latest
+        runs-on: {group: ci-untrusted, labels: [self-hosted, Linux, X64, ram-ge-16g, disk-ge-100g]}
         strategy:
             fail-fast: false
             matrix:
