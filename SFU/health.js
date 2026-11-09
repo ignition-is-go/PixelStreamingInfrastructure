@@ -9,6 +9,18 @@
  * @typedef {{ id: string, transport?: ObservedTransport, consumers: ObservedMedia[] }} ObservedPeer
  */
 
+// mediasoup 3.15.5 decodes negative RTCP loss as sign-magnitude, then
+// serializes it through an unsigned worker field. Recover the signed RFC 3550
+// value at the health boundary; native RR coverage pins this dependency behavior.
+/** @param {number} value @returns {number} */
+function receiverReportLoss(value) {
+    if (value >= 0xff800000 && value <= 0xffffffff) {
+        const signed = value - 0x100000000;
+        return signed === -0x800000 ? signed : -(0x800000 + signed);
+    }
+    return value;
+}
+
 /**
  * @param {ObservedMedia} media
  * @param {'in' | 'out'} direction
@@ -21,7 +33,7 @@ async function mediaObservation(media, direction) {
             id: media.id, kind: media.kind, paused: media.paused || media.producerPaused === true,
             samples: stats.map(row => ({
                 ssrc: row.ssrc, packets: row.packetCount, bytes: row.byteCount,
-                bitrate: row.bitrate, packetsLost: row.packetsLost
+                bitrate: row.bitrate, packetsLost: direction === 'out' ? receiverReportLoss(row.packetsLost) : row.packetsLost
             }))
         };
     } catch (error) {

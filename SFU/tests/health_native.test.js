@@ -30,6 +30,25 @@ test('native mediasoup producer and consumer counters survive health collection'
         assert.equal(report.viewers[0].outputs[0].samples.length, 1);
         assert.ok(report.viewers[0].outputs[0].samples[0].packets >= 9);
         assert.ok(report.viewers[0].outputs[0].samples[0].bytes > 0);
+        const ssrc = consumer.rtpParameters.encodings[0].ssrc;
+        const rr = Buffer.alloc(32);
+        rr[0] = 0x81;
+        rr[1] = 201;
+        rr.writeUInt16BE(7, 2);
+        rr.writeUInt32BE(777, 4);
+        rr.writeUInt32BE(ssrc, 8);
+        rr.writeUIntBE(0xffffff, 13, 3); // RFC 3550 signed cumulative loss: -1.
+        rr.writeUInt32BE(9, 16);
+        output.sendRtcp(rr);
+        let stats;
+        for (let attempt = 0; attempt < 100; attempt++) {
+            stats = await consumer.getStats();
+            if (stats[0].packetsLost !== 0) break;
+            await new Promise(resolve => setTimeout(resolve, 5));
+        }
+        const received = await collectHealth({ generation: 1, transport: {}, producers: [] }, [{ id: 'native-viewer', consumers: [consumer] }]);
+        assert.equal(received.viewers[0].outputs[0].samples[0].packetsLost, -1, JSON.stringify(stats));
+
     } finally {
         worker.close();
     }
