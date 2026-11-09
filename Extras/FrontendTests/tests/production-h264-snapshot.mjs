@@ -70,6 +70,13 @@ export async function mediaSnapshot() {
             mediaTime: metadata.mediaTime,
             presentationTime: metadata.presentationTime,
             freezes: videoStats.freezeCount ?? null,
+            freezeDuration: videoStats.totalFreezesDuration ?? null,
+            packetsLost: videoStats.packetsLost ?? null,
+            packetsReceived: videoStats.packetsReceived ?? null,
+            keyFramesDecoded: videoStats.keyFramesDecoded ?? null,
+            totalDecodeTime: videoStats.totalDecodeTime ?? null,
+            jitterBufferDelay: videoStats.jitterBufferDelay ?? null,
+            jitterBufferEmitted: videoStats.jitterBufferEmittedCount ?? null,
             dropped: videoStats.framesDropped ?? null
         },
         audio: {

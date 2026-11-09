@@ -116,7 +116,20 @@ phase = 'driver startup';
         session.before = before;
         try { requireMediaFormat(before, expected); } catch (error) { throw new SmokeFailure(error.message); }
         phase = 'sustained playback ' + index;
-        await driver.sleep(expected.seconds * 1000);
+        const observeUntil = Date.now() + expected.seconds * 1000;
+        if (process.env.PIXELSTREAM_DIAGNOSTIC_TIMELINE === '1') {
+            session.timeline = [];
+            while (observeUntil - Date.now() > 1000) {
+                await driver.sleep(1000);
+                try {
+                    const sample = await snapshot(driver);
+                    session.timeline.push({ at: sample.at, video: sample.video });
+                } catch (error) {
+                    session.timeline.push({ at: Date.now(), error: error.message });
+                }
+            }
+        }
+        await driver.sleep(Math.max(0, observeUntil - Date.now()));
         const after = await snapshot(driver);
         session.after = after;
         let result;
