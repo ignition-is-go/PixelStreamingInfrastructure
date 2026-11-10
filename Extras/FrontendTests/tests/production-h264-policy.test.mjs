@@ -38,6 +38,7 @@ for (const [name, change, message] of [
     ['missing audio decode evidence', (s) => { s.audio.samples = null; }, /counter is unavailable/],
     ['choppy concealed audio', (s) => { s.audio.concealed = 400000; }, /concealment/],
     ['video freeze', (s) => { s.video.freezes = 1; }, /froze/],
+    ['missing video freeze evidence', (s) => { s.video.freezes = null; }, /freeze counter is unavailable/],
     ['rendered track replacement', (s) => { s.video.track = 'different-track'; }, /identity changed/],
     ['SSRC replacement', (s) => { s.video.ssrc = 42; }, /identity changed/],
     ['RTP report replacement', (s) => { s.video.statsId = 'other'; }, /identity changed/],

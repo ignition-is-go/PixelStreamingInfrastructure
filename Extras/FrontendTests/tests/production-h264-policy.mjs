@@ -23,6 +23,8 @@ export function requireMediaFormat(sample, expected) {
     requireCondition(typeof sample.video.track === 'string' && typeof sample.video.statsId === 'string' &&
         Number.isFinite(sample.video.ssrc), 'rendered video identity is unavailable');
     requireCondition(Number.isFinite(sample.video.decoded), 'video decode counter is unavailable');
+    requireCondition(Number.isSafeInteger(sample.video.freezes) && sample.video.freezes >= 0,
+        'video freeze counter is unavailable');
     requireCondition(Number.isFinite(sample.audio.samples), 'audio decode counter is unavailable');
     if (expected.app) {
         requireCondition(Number.isInteger(sample.blockedDataMessages) && sample.blockedDataMessages >= 0,
@@ -66,8 +68,6 @@ export function requirePlayback(before, after, expected) {
             'audio concealment exceeds five percent'
         );
     }
-    if (Number.isFinite(before.video.freezes) && Number.isFinite(after.video.freezes)) {
-        requireCondition(after.video.freezes === before.video.freezes, 'video froze during observation');
-    }
+    requireCondition(after.video.freezes === before.video.freezes, 'video froze during observation');
     return { seconds: elapsed, decoded, presented, audioSamples: samples };
 }
