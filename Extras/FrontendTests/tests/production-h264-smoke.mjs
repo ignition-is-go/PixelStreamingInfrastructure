@@ -45,11 +45,12 @@ if (client === 'app') {
     const appCommit = requiredEnvironment('PIXELSTREAM_APP_SOURCE_COMMIT');
     const wasmSha256 = requiredEnvironment('PIXELSTREAM_APP_WASM_SHA256');
     const route = requiredEnvironment('PIXELSTREAM_APP_EXPECTED_ROUTE');
-    const bufferMs = Number(requiredEnvironment('PIXELSTREAM_APP_EXPECTED_BUFFER_MS'));
+    const expectedBuffer = requiredEnvironment('PIXELSTREAM_APP_EXPECTED_BUFFER_MS');
+    const bufferMs = expectedBuffer === 'default' ? null : Number(expectedBuffer);
     if (!/^[0-9a-f]{40}$/.test(appCommit)) throw new Error('PIXELSTREAM_APP_SOURCE_COMMIT must be an exact Git commit');
     if (!/^[0-9a-f]{64}$/.test(wasmSha256)) throw new Error('PIXELSTREAM_APP_WASM_SHA256 must be a SHA-256 digest');
     if (!['edge', 'direct', 'local'].includes(route)) throw new Error('unsupported app media route');
-    if (!Number.isSafeInteger(bufferMs) || bufferMs < 0 || bufferMs > 4000) {
+    if (bufferMs !== null && (!/^\d+$/.test(expectedBuffer) || !Number.isSafeInteger(bufferMs) || bufferMs > 4000)) {
         throw new Error('invalid app receiver target');
     }
     expected.app = { sourceCommit: appCommit, wasmSha256, route, bufferMs };

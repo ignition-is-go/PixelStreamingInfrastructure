@@ -64,7 +64,8 @@ Set `PIXELSTREAM_PRODUCTION_VIEWER_URL` to the staged viewer URL and
 `PIXELSTREAM_SOURCE_COMMIT` to the harness commit. Set
 `PIXELSTREAM_APP_EXPECTED_ROUTE` to `edge`, `direct`, or `local` and
 `PIXELSTREAM_APP_EXPECTED_BUFFER_MS` to the receiver target for the browser
-and route. Set the browser and receipt path as for the reference client, then
+and route. Use `default` when the app leaves the browser receiver target unset.
+Set the browser and receipt path as for the reference client, then
 run `npm run test:h264:production`.
 
 The app observer allows only the camera state request on the WebRTC data
