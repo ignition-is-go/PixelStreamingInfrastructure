@@ -47,7 +47,7 @@ jobs:
               working-directory: Extras/FrontendTests
 
     test-h264-platform-browsers:
-        runs-on: {group: ci-macos-ephemeral, labels: [self-hosted, macOS, ARM64, ram-ge-40g, disk-ge-100g, site-lucid-lab]}
+        runs-on: {group: ci-macos-ephemeral, labels: [self-hosted, macOS, ARM64, ram-ge-40g, site-lucid-lab]}
         steps:
             - name: Checkout
               uses: actions/checkout@v4
