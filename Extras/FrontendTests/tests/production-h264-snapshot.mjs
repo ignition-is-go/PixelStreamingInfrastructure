@@ -6,7 +6,7 @@ export async function mediaSnapshot() {
     if (!video) throw new Error('decoded video is not ready');
     const track = video.srcObject.getVideoTracks()[0];
     const peers = window.__pixelstreamSmokePeers;
-    if (!Array.isArray(peers)) throw new Error('reference-client observer is missing');
+    if (!Array.isArray(peers)) throw new Error('browser media observer is missing');
     const peer = peers.find(
         (candidate) => candidate.connectionState === 'connected' &&
             candidate.getReceivers().some((receiver) => receiver.track?.id === track.id)
@@ -49,10 +49,20 @@ export async function mediaSnapshot() {
     const audioCodec = reports.get(audioStats.codecId);
     const videoCodec = renderedReports.get(videoStats.codecId) ?? reports.get(videoStats.codecId);
     const playback = video.getVideoPlaybackQuality?.();
+    const appSourceCommit = window.__pixelstreamSmokeAppCommit;
+    const app = appSourceCommit && {
+        sourceCommit: appSourceCommit,
+        audioEnabled: !video.muted && video.volume > 0,
+        route: [...(video.closest('.video-pane-shell') ?? document)
+            .querySelectorAll('[aria-label="Stream info"] .video-pane-popup__row')]
+            .find((row) => row.firstElementChild?.textContent === 'Media via')
+            ?.lastElementChild?.textContent.match(/^(Edge|Direct|Local) \(/)?.[1]?.toLowerCase() ?? null
+    };
     return {
         at: Date.now(),
         blockedDataMessages: window.__pixelstreamSmokeBlockedDataMessages ?? null,
         visibility: document.visibilityState ?? null,
+        ...(app ? { app } : {}),
         peer: peers.indexOf(peer),
         connection: peer.connectionState,
         protocols: candidates.map((item) => item?.protocol?.toLowerCase() ?? 'unknown'),

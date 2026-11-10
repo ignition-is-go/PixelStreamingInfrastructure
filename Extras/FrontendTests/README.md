@@ -48,3 +48,26 @@ schema-version-2 receipt is required; the earlier two-frame smoke is insufficien
 Production endpoints belong in protected CI secrets, not this repository.
 Safari requires a GUI runner with authorized system Safari WebDriver. The
 protected orchestration workflow lives in pulse-deploy.
+
+## Qualify the compiled Pulse Pixelstream viewer
+
+Stage a copy of the compiled app from a known Git commit. Point its runtime
+config at the isolated canary. Prepare the copy of the entry page before
+serving it:
+
+    export PIXELSTREAM_SMOKE_CLIENT=app
+    export PIXELSTREAM_APP_SOURCE_COMMIT="$APP_BUILD_COMMIT"
+    node prepare-production-smoke-client.cjs /path/to/staged/app/index.html
+
+Set `PIXELSTREAM_PRODUCTION_VIEWER_URL` to the staged viewer URL and
+`PIXELSTREAM_SOURCE_COMMIT` to the harness commit. Set
+`PIXELSTREAM_APP_EXPECTED_ROUTE` to `edge`, `direct`, or `local` and
+`PIXELSTREAM_APP_EXPECTED_BUFFER_MS` to the receiver target for the browser
+and route. Set the browser and receipt path as for the reference client, then
+run `npm run test:h264:production`.
+
+The app observer blocks outgoing WebRTC data channel commands and leaves
+negotiation and receiver settings alone. The test uses **Unmute stream audio**
+and checks **Media via** in the viewer's **Stream status** dialog. A fallback
+route, muted playback, build mismatch, or incorrect receiver target fails the
+qualification.

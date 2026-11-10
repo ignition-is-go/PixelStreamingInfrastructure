@@ -56,3 +56,16 @@ test('accepts live Firefox frames with a zero media timeline and advancing prese
     before.video.mediaTime = after.video.mediaTime = 0;
     assert.equal(requirePlayback(before, after, expected).decoded, 900);
 });
+
+test('rejects an otherwise healthy app session that falls back to a different route', () => {
+    const [before, after] = samples();
+    const app = { sourceCommit: 'a'.repeat(40), route: 'edge', bufferMs: 500 };
+    for (const sample of [before, after]) {
+        sample.app = { sourceCommit: app.sourceCommit, route: 'edge', audioEnabled: true };
+        sample.blockedDataMessages = 0;
+        sample.video.jitterBufferTarget = 500;
+    }
+    assert.equal(requirePlayback(before, after, { ...expected, app }).presented, 900);
+    after.app.route = 'direct';
+    assert.throws(() => requirePlayback(before, after, { ...expected, app }), /required media route/);
+});

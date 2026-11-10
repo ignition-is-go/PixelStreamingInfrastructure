@@ -32,12 +32,26 @@ if (!Object.hasOwn(browsers, browserName)) throw new Error('unsupported PIXELSTR
 const viewerUrl = requiredEnvironment('PIXELSTREAM_PRODUCTION_VIEWER_URL');
 const sourceCommit = requiredEnvironment('PIXELSTREAM_SOURCE_COMMIT');
 if (!/^[0-9a-f]{40}$/i.test(sourceCommit)) throw new Error('PIXELSTREAM_SOURCE_COMMIT must be an exact Git commit');
+const client = process.env.PIXELSTREAM_SMOKE_CLIENT ?? 'reference';
+if (!['reference', 'app'].includes(client)) throw new Error('unsupported PIXELSTREAM_SMOKE_CLIENT');
+report.client = client;
 const expected = {
     width: positiveInteger('PIXELSTREAM_EXPECTED_WIDTH', '3840'),
     height: positiveInteger('PIXELSTREAM_EXPECTED_HEIGHT', '2160'),
     seconds: positiveInteger('PIXELSTREAM_OBSERVE_SECONDS', '30'),
     minimumFps: positiveInteger('PIXELSTREAM_MINIMUM_FPS', '24')
 };
+if (client === 'app') {
+    const appCommit = requiredEnvironment('PIXELSTREAM_APP_SOURCE_COMMIT');
+    const route = requiredEnvironment('PIXELSTREAM_APP_EXPECTED_ROUTE');
+    const bufferMs = Number(requiredEnvironment('PIXELSTREAM_APP_EXPECTED_BUFFER_MS'));
+    if (!/^[0-9a-f]{40}$/.test(appCommit)) throw new Error('PIXELSTREAM_APP_SOURCE_COMMIT must be an exact Git commit');
+    if (!['edge', 'direct', 'local'].includes(route)) throw new Error('unsupported app media route');
+    if (!Number.isSafeInteger(bufferMs) || bufferMs < 0 || bufferMs > 4000) {
+        throw new Error('invalid app receiver target');
+    }
+    expected.app = { sourceCommit: appCommit, route, bufferMs };
+}
 if (expected.seconds < 30 || expected.minimumFps < 24) {
     throw new Error('the qualification gate requires at least thirty seconds and 24 fps');
 }
@@ -77,19 +91,27 @@ async function join(driver) {
         await driver.get('about:blank');
         await driver.get(viewerUrl);
     } catch {
-        throw new SmokeFailure('browser navigation failed before opening the reference client');
+        throw new SmokeFailure('browser navigation failed before opening the ' + client + ' client');
     }
     const deadline = Date.now() + timeoutMs;
     let reason = 'media did not become ready';
     while (Date.now() < deadline) {
-        for (const selector of ['#connectOverlay', '#playOverlay']) {
+        const selectors = client === 'app'
+            ? ['button[aria-label="Unmute stream audio"]', 'button[aria-label="Stream status"][aria-expanded="false"]']
+            : ['#connectOverlay', '#playOverlay'];
+        for (const selector of selectors) {
             for (const overlay of await driver.findElements(By.css(selector))) {
                 if (await overlay.isDisplayed()) await overlay.click();
             }
         }
         const result = await driver.executeAsyncScript(snapshotScript);
-        if (result.sample) return result.sample;
-        reason = result.error;
+        if (result.sample) {
+            const app = result.sample.app;
+            if (client !== 'app' || !app || (app.route && app.audioEnabled)) return result.sample;
+            reason = 'viewer audio or media route did not become ready';
+        } else {
+            reason = result.error;
+        }
         await driver.sleep(250);
     }
     throw new SmokeFailure(reason);
