@@ -18,7 +18,7 @@ permissions:
 
 jobs:
     test-sfu:
-        runs-on: ubuntu-latest
+        runs-on: {group: ci-untrusted, labels: [self-hosted, Linux, X64, ram-ge-16g, disk-ge-100g]}
         steps:
             - name: Checkout
               uses: actions/checkout@v4
@@ -47,7 +47,7 @@ jobs:
               working-directory: Extras/FrontendTests
 
     test-h264-platform-browsers:
-        runs-on: macos-latest
+        runs-on: {group: ci-macos-ephemeral, labels: [self-hosted, macOS, ARM64, ram-ge-40g, site-lucid-lab]}
         steps:
             - name: Checkout
               uses: actions/checkout@v4

@@ -47,7 +47,7 @@ jobs:
 
   streaming-test-win:
     if: github.repository == 'EpicGames/PixelStreamingInfrastructure'
-    runs-on: windows-latest
+    runs-on: {group: ci-windows-ephemeral, labels: [self-hosted, Windows, X64, ram-ge-8g, disk-ge-100g]}
     steps:
     - name: Checkout source code
       uses: actions/checkout@v4
