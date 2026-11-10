@@ -23,7 +23,19 @@ export function requireMediaFormat(sample, expected) {
     requireCondition(typeof sample.video.track === 'string' && typeof sample.video.statsId === 'string' &&
         Number.isFinite(sample.video.ssrc), 'rendered video identity is unavailable');
     requireCondition(Number.isFinite(sample.video.decoded), 'video decode counter is unavailable');
+    requireCondition(Number.isSafeInteger(sample.video.freezes) && sample.video.freezes >= 0,
+        'video freeze counter is unavailable');
     requireCondition(Number.isFinite(sample.audio.samples), 'audio decode counter is unavailable');
+    if (expected.app) {
+        requireCondition(Number.isInteger(sample.blockedDataMessages) && sample.blockedDataMessages >= 0,
+            'read-only app observer is missing');
+        requireCondition(sample.app?.sourceCommit === expected.app.sourceCommit, 'compiled app commit differs from the required commit');
+        requireCondition(sample.app.wasmSha256 === expected.app.wasmSha256, 'compiled app WASM hash differs from the required hash');
+        requireCondition(sample.app.route === expected.app.route, 'viewer is not playing the required media route');
+        requireCondition(sample.app.audioEnabled === true, 'viewer audio is not enabled');
+        requireCondition(sample.video.jitterBufferTarget === expected.app.bufferMs,
+            'viewer did not apply the required video receiver target');
+    }
 }
 
 export function requirePlayback(before, after, expected) {
@@ -56,8 +68,6 @@ export function requirePlayback(before, after, expected) {
             'audio concealment exceeds five percent'
         );
     }
-    if (Number.isFinite(before.video.freezes) && Number.isFinite(after.video.freezes)) {
-        requireCondition(after.video.freezes === before.video.freezes, 'video froze during observation');
-    }
+    requireCondition(after.video.freezes === before.video.freezes, 'video froze during observation');
     return { seconds: elapsed, decoded, presented, audioSamples: samples };
 }

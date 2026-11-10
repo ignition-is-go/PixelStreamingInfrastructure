@@ -38,6 +38,7 @@ for (const [name, change, message] of [
     ['missing audio decode evidence', (s) => { s.audio.samples = null; }, /counter is unavailable/],
     ['choppy concealed audio', (s) => { s.audio.concealed = 400000; }, /concealment/],
     ['video freeze', (s) => { s.video.freezes = 1; }, /froze/],
+    ['missing video freeze evidence', (s) => { s.video.freezes = null; }, /freeze counter is unavailable/],
     ['rendered track replacement', (s) => { s.video.track = 'different-track'; }, /identity changed/],
     ['SSRC replacement', (s) => { s.video.ssrc = 42; }, /identity changed/],
     ['RTP report replacement', (s) => { s.video.statsId = 'other'; }, /identity changed/],
@@ -55,4 +56,17 @@ test('accepts live Firefox frames with a zero media timeline and advancing prese
     const [before, after] = samples();
     before.video.mediaTime = after.video.mediaTime = 0;
     assert.equal(requirePlayback(before, after, expected).decoded, 900);
+});
+
+test('rejects an otherwise healthy app session that falls back to a different route', () => {
+    const [before, after] = samples();
+    const app = { sourceCommit: 'a'.repeat(40), wasmSha256: 'b'.repeat(64), route: 'edge', bufferMs: 500 };
+    for (const sample of [before, after]) {
+        sample.app = { sourceCommit: app.sourceCommit, wasmSha256: app.wasmSha256, route: 'edge', audioEnabled: true };
+        sample.blockedDataMessages = 0;
+        sample.video.jitterBufferTarget = 500;
+    }
+    assert.equal(requirePlayback(before, after, { ...expected, app }).presented, 900);
+    after.app.route = 'direct';
+    assert.throws(() => requirePlayback(before, after, { ...expected, app }), /required media route/);
 });
