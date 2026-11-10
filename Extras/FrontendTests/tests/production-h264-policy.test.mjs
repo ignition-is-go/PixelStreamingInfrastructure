@@ -59,9 +59,9 @@ test('accepts live Firefox frames with a zero media timeline and advancing prese
 
 test('rejects an otherwise healthy app session that falls back to a different route', () => {
     const [before, after] = samples();
-    const app = { sourceCommit: 'a'.repeat(40), route: 'edge', bufferMs: 500 };
+    const app = { sourceCommit: 'a'.repeat(40), wasmSha256: 'b'.repeat(64), route: 'edge', bufferMs: 500 };
     for (const sample of [before, after]) {
-        sample.app = { sourceCommit: app.sourceCommit, route: 'edge', audioEnabled: true };
+        sample.app = { sourceCommit: app.sourceCommit, wasmSha256: app.wasmSha256, route: 'edge', audioEnabled: true };
         sample.blockedDataMessages = 0;
         sample.video.jitterBufferTarget = 500;
     }

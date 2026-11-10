@@ -28,6 +28,7 @@ export function requireMediaFormat(sample, expected) {
         requireCondition(Number.isInteger(sample.blockedDataMessages) && sample.blockedDataMessages >= 0,
             'read-only app observer is missing');
         requireCondition(sample.app?.sourceCommit === expected.app.sourceCommit, 'compiled app commit differs from the required commit');
+        requireCondition(sample.app.wasmSha256 === expected.app.wasmSha256, 'compiled app WASM hash differs from the required hash');
         requireCondition(sample.app.route === expected.app.route, 'viewer is not playing the required media route');
         requireCondition(sample.app.audioEnabled === true, 'viewer audio is not enabled');
         requireCondition(sample.video.jitterBufferTarget === expected.app.bufferMs,

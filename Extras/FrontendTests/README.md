@@ -57,6 +57,7 @@ serving it:
 
     export PIXELSTREAM_SMOKE_CLIENT=app
     export PIXELSTREAM_APP_SOURCE_COMMIT="$APP_BUILD_COMMIT"
+    export PIXELSTREAM_APP_WASM_SHA256="$APP_BUILD_WASM_SHA256"
     node prepare-production-smoke-client.cjs /path/to/staged/app/index.html
 
 Set `PIXELSTREAM_PRODUCTION_VIEWER_URL` to the staged viewer URL and
@@ -70,4 +71,5 @@ The app observer blocks outgoing WebRTC data channel commands and leaves
 negotiation and receiver settings alone. The test uses **Unmute stream audio**
 and checks **Media via** in the viewer's **Stream status** dialog. A fallback
 route, muted playback, build mismatch, or incorrect receiver target fails the
-qualification.
+qualification. Preparation verifies the staged WASM against the digest from
+the candidate build before it stamps the entry page.

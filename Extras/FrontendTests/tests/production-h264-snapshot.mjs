@@ -49,9 +49,9 @@ export async function mediaSnapshot() {
     const audioCodec = reports.get(audioStats.codecId);
     const videoCodec = renderedReports.get(videoStats.codecId) ?? reports.get(videoStats.codecId);
     const playback = video.getVideoPlaybackQuality?.();
-    const appSourceCommit = window.__pixelstreamSmokeAppCommit;
-    const app = appSourceCommit && {
-        sourceCommit: appSourceCommit,
+    const appBuild = window.__pixelstreamSmokeAppBuild;
+    const app = appBuild && {
+        ...appBuild,
         audioEnabled: !video.muted && video.volume > 0,
         route: [...(video.closest('.video-pane-shell') ?? document)
             .querySelectorAll('[aria-label="Stream info"] .video-pane-popup__row')]
