@@ -75,6 +75,11 @@ export async function mediaSnapshot() {
             packetsReceived: videoStats.packetsReceived ?? null,
             keyFramesDecoded: videoStats.keyFramesDecoded ?? null,
             totalDecodeTime: videoStats.totalDecodeTime ?? null,
+            decoderImplementation: videoStats.decoderImplementation ?? null,
+            powerEfficientDecoder: videoStats.powerEfficientDecoder ?? null,
+            totalProcessingDelay: videoStats.totalProcessingDelay ?? null,
+            jitterBufferMinimumDelay: videoStats.jitterBufferMinimumDelay ?? null,
+            jitterBufferTargetDelay: videoStats.jitterBufferTargetDelay ?? null,
             jitterBufferDelay: videoStats.jitterBufferDelay ?? null,
             jitterBufferEmitted: videoStats.jitterBufferEmittedCount ?? null,
             dropped: videoStats.framesDropped ?? null
