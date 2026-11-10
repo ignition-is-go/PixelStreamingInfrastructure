@@ -14,7 +14,7 @@ permissions:
 jobs:
   signalling-server-image:
     if: github.repository == 'EpicGames/PixelStreamingInfrastructure'
-    runs-on: {group: ci-untrusted, labels: [self-hosted, Linux, X64, ram-ge-16g, disk-ge-100g]}
+    runs-on: {group: ci-trusted-linux-persistent, labels: [self-hosted, Linux, X64, ram-ge-16g, disk-ge-100g]}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
