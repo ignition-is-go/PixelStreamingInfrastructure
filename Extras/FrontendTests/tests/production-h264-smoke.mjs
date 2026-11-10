@@ -1,5 +1,5 @@
 import fs from 'node:fs';
-import { Builder, By } from 'selenium-webdriver';
+import { Builder, By, Key, error as webdriverError } from 'selenium-webdriver';
 import chrome from 'selenium-webdriver/chrome.js';
 import firefox from 'selenium-webdriver/firefox.js';
 import safari from 'selenium-webdriver/safari.js';
@@ -104,7 +104,13 @@ async function join(driver) {
             : ['#connectOverlay', '#playOverlay'];
         for (const selector of selectors) {
             for (const overlay of await driver.findElements(By.css(selector))) {
-                if (await overlay.isDisplayed()) await overlay.click();
+                try {
+                    if (!await overlay.isDisplayed()) continue;
+                    if (client === 'app') await overlay.sendKeys(Key.SPACE);
+                    else await overlay.click();
+                } catch (error) {
+                    if (!(error instanceof webdriverError.StaleElementReferenceError)) throw error;
+                }
             }
         }
         const result = await driver.executeAsyncScript(snapshotScript);
@@ -175,6 +181,8 @@ phase = 'driver startup';
     }
     report.failure = {
         phase,
+        ...(['ElementClickInterceptedError', 'ElementNotInteractableError', 'StaleElementReferenceError', 'TimeoutError']
+            .includes(error.name) ? { webdriverError: error.name } : {}),
         message: error instanceof SmokeFailure ? error.message : phase + ' failed before media qualification'
     };
     process.stderr.write(browserName + ': ' + report.failure.message + '\n');
