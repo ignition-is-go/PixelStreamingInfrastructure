@@ -31,3 +31,8 @@ test('observer precedes application scripts and preserves the native constructor
 test('observer refuses an unrelated document', () => {
     assert.throws(() => prepare('<video></video>'), /no head/);
 });
+
+test('observer permits the explicit 500 ms canary treatment', () => {
+    assert.match(prepare('<head></head>', 500), /\)\(500\);<\/script>/);
+    assert.throws(() => prepare('<head></head>', 501), /unsupported smoke buffer target/);
+});
