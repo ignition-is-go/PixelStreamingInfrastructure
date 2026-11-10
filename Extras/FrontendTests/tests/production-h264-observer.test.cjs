@@ -6,14 +6,22 @@ const { prepare } = require('../prepare-production-smoke-client.cjs');
 test('observer precedes application scripts and preserves the native constructor', () => {
     const html = prepare('<html><head><script src="player.js"></script></head></html>');
     assert.ok(html.indexOf('data-pixelstream-smoke-observer') < html.indexOf('src="player.js"'));
-    const script = html.match(/<script data-pixelstream-smoke-observer="2">([\s\S]*?)<\/script>/)[1];
+    const script = html.match(/<script data-pixelstream-smoke-observer="3">([\s\S]*?)<\/script>/)[1];
     class Native {
         constructor(...args) { this.args = args; }
         addEventListener(name, callback) { this[name] = callback; }
         static generateCertificate() { return 'native certificate'; }
     }
-    const window = { RTCPeerConnection: Native };
+    class DataChannel {
+        send(value) { this.sent = value; }
+    }
+    const window = { RTCPeerConnection: Native, RTCDataChannel: DataChannel };
     vm.runInNewContext(script, { window });
+    const channel = new window.RTCDataChannel();
+    channel.send(new Uint8Array([51, 0, 0]));
+    channel.send('any application command');
+    assert.equal(channel.sent, undefined);
+    assert.equal(window.__pixelstreamSmokeBlockedDataMessages, 2);
     const peer = new window.RTCPeerConnection('configuration', 'constraints');
     assert.ok(peer instanceof Native);
     assert.deepEqual(peer.args, ['configuration', 'constraints']);

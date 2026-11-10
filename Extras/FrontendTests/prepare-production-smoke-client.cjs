@@ -1,6 +1,11 @@
 const fs = require('node:fs');
 
 function observePeers(jitterBufferTarget) {
+    // Epic's reference UI can send encoder and input commands during startup.
+    // This page only observes media; RTP/RTCP and inbound SCTP are unaffected.
+    let blocked = 0;
+    window.RTCDataChannel.prototype.send = function () { blocked++; };
+    Object.defineProperty(window, '__pixelstreamSmokeBlockedDataMessages', { get: () => blocked });
     window.__pixelstreamSmokePeers = [];
     const Native = window.RTCPeerConnection;
     window.RTCPeerConnection = class extends Native {
@@ -18,7 +23,7 @@ function observePeers(jitterBufferTarget) {
 
 function prepare(html, jitterBufferTarget = 200) {
     if (![200, 500].includes(jitterBufferTarget)) throw new Error('unsupported smoke buffer target');
-    const marker = 'data-pixelstream-smoke-observer="2"';
+    const marker = 'data-pixelstream-smoke-observer="3"';
     if (html.includes(marker)) return html;
     if (!/<head(?:\s[^>]*)?>/i.test(html)) throw new Error('reference client has no head element');
     return html.replace(
