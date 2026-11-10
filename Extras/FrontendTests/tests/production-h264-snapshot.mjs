@@ -51,6 +51,7 @@ export async function mediaSnapshot() {
     const playback = video.getVideoPlaybackQuality?.();
     return {
         at: Date.now(),
+        blockedDataMessages: window.__pixelstreamSmokeBlockedDataMessages ?? null,
         visibility: document.visibilityState ?? null,
         peer: peers.indexOf(peer),
         connection: peer.connectionState,
