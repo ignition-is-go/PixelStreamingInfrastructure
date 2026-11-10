@@ -52,7 +52,7 @@ jobs:
                   node scripts/update-protocol-types.mjs --check-source
 
     containers:
-        runs-on: {group: ci-untrusted, labels: [self-hosted, Linux, X64, ram-ge-16g, disk-ge-100g]}
+        runs-on: {group: ci-trusted-linux-persistent, labels: [self-hosted, Linux, X64, ram-ge-16g, disk-ge-100g]}
         strategy:
             fail-fast: false
             matrix:
