@@ -27,7 +27,7 @@ jobs:
     # only run this on the main repo, not forks
     if: github.repository == 'EpicGames/PixelStreamingInfrastructure'
     name: Prune
-    runs-on: ubuntu-latest
+    runs-on: {group: ci-untrusted, labels: [self-hosted, Linux, X64, ram-ge-16g, disk-ge-100g]}
     steps:
       - name: Checkout master
         uses: actions/checkout@v4

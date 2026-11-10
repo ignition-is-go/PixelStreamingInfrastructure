@@ -16,7 +16,7 @@ permissions:
 jobs:
   signalling-protocol-test:
     if: github.repository == 'EpicGames/PixelStreamingInfrastructure'
-    runs-on: ubuntu-latest
+    runs-on: {group: ci-untrusted, labels: [self-hosted, Linux, X64, ram-ge-16g, disk-ge-100g]}
     steps:
     - name: Checkout source code
       uses: actions/checkout@v4

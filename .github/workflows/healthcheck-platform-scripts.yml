@@ -13,7 +13,7 @@ permissions:
 jobs:
   run-script-linux:
     if: github.repository == 'EpicGames/PixelStreamingInfrastructure'
-    runs-on: ubuntu-latest
+    runs-on: {group: ci-untrusted, labels: [self-hosted, Linux, X64, ram-ge-16g, disk-ge-100g]}
     steps:
       - name: Checkout source code
         uses: actions/checkout@v4
@@ -25,7 +25,7 @@ jobs:
 
   run-script-macos:
     if: github.repository == 'EpicGames/PixelStreamingInfrastructure'
-    runs-on: macos-latest
+    runs-on: {group: ci-macos-ephemeral, labels: [self-hosted, macOS, ARM64, ram-ge-40g, disk-ge-100g, site-lucid-lab]}
     steps:
       - name: Checkout source code
         uses: actions/checkout@v4
@@ -37,7 +37,7 @@ jobs:
 
   run-script-windows:
     if: github.repository == 'EpicGames/PixelStreamingInfrastructure'
-    runs-on: windows-latest
+    runs-on: {group: ci-windows-ephemeral, labels: [self-hosted, Windows, X64, ram-ge-8g, disk-ge-100g]}
     steps:
       - name: Checkout source code
         uses: actions/checkout@v4
