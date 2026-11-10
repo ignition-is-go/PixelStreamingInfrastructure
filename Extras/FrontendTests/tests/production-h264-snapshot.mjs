@@ -47,6 +47,7 @@ export async function mediaSnapshot() {
         throw new Error('rendered track changed while sampling');
     }
     const audioCodec = reports.get(audioStats.codecId);
+    const videoCodec = renderedReports.get(videoStats.codecId) ?? reports.get(videoStats.codecId);
     const playback = video.getVideoPlaybackQuality?.();
     return {
         at: Date.now(),
@@ -59,7 +60,8 @@ export async function mediaSnapshot() {
             track: track.id,
             statsId: videoStats.id,
             ssrc: videoStats.ssrc,
-            codec: (renderedReports.get(videoStats.codecId) ?? reports.get(videoStats.codecId))?.mimeType ?? null,
+            codec: videoCodec?.mimeType ?? null,
+            codecParameters: videoCodec?.sdpFmtpLine ?? null,
             width: video.videoWidth,
             height: video.videoHeight,
             decoded: videoStats.framesDecoded ?? null,
