@@ -6,10 +6,25 @@ function observePeers(jitterBufferTarget, appBuild) {
     // Epic's reference UI can send encoder and input commands during startup.
     // This page only observes media; RTP/RTCP and inbound SCTP are unaffected.
     let blocked = 0;
-    window.RTCDataChannel.prototype.send = function () { blocked++; };
+    let stateRequests = 0;
+    const send = window.RTCDataChannel.prototype.send;
+    const requestState = '{"StreamCamera":{"RequestState":true}}';
+    const stateRequest = [50, requestState.length, 0,
+        ...Array.from(requestState, (character) => [character.charCodeAt(0), 0]).flat()];
+    window.RTCDataChannel.prototype.send = function (value) {
+        if (appBuild && ArrayBuffer.isView(value) && value.byteLength === stateRequest.length) {
+            const bytes = new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+            if (bytes.every((byte, index) => byte === stateRequest[index])) {
+                stateRequests++;
+                return send.call(this, value);
+            }
+        }
+        blocked++;
+    };
     Object.defineProperty(window, '__pixelstreamSmokeBlockedDataMessages', { get: () => blocked });
     if (appBuild) {
         Object.defineProperty(window, '__pixelstreamSmokeAppBuild', { value: Object.freeze(appBuild) });
+        Object.defineProperty(window, '__pixelstreamSmokeStateRequests', { get: () => stateRequests });
     }
     window.__pixelstreamSmokePeers = [];
     const Native = window.RTCPeerConnection;

@@ -52,6 +52,7 @@ export async function mediaSnapshot() {
     const appBuild = window.__pixelstreamSmokeAppBuild;
     const app = appBuild && {
         ...appBuild,
+        stateRequests: window.__pixelstreamSmokeStateRequests,
         audioEnabled: !video.muted && video.volume > 0,
         route: [...(video.closest('.video-pane-shell') ?? document)
             .querySelectorAll('[aria-label="Stream info"] .video-pane-popup__row')]

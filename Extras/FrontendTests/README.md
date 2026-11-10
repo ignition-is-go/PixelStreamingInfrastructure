@@ -67,8 +67,8 @@ Set `PIXELSTREAM_PRODUCTION_VIEWER_URL` to the staged viewer URL and
 and route. Set the browser and receipt path as for the reference client, then
 run `npm run test:h264:production`.
 
-The app observer blocks outgoing WebRTC data channel commands and leaves
-negotiation and receiver settings alone. The test uses **Unmute stream audio**
+The app observer allows only the camera state request on the WebRTC data
+channel. It leaves negotiation and receiver settings alone. The test uses **Unmute stream audio**
 and checks **Media via** in the viewer's **Stream status** dialog. A fallback
 route, muted playback, build mismatch, or incorrect receiver target fails the
 qualification. Preparation verifies the staged WASM against the digest from

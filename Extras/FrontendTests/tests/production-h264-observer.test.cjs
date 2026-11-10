@@ -57,13 +57,25 @@ test('app observer identifies the build without taking over its receiver policy'
     class Native {
         addEventListener() { assert.fail('app observer must not set receiver parameters'); }
     }
-    const window = { RTCPeerConnection: Native, RTCDataChannel: class {} };
+    class DataChannel {
+        send(value) { this.sent = value; }
+    }
+    const window = { RTCPeerConnection: Native, RTCDataChannel: DataChannel };
     vm.runInNewContext(script, { window });
     new window.RTCPeerConnection();
-    new window.RTCDataChannel().send('application command');
+    const channel = new window.RTCDataChannel();
+    const encode = (id, json) => Uint8Array.of(id, json.length, 0, ...Buffer.from(json, 'utf16le'));
+    const request = '{"StreamCamera":{"RequestState":true}}';
+    const allowed = encode(50, request);
+    channel.send(allowed);
+    channel.send(encode(50, '{"StreamCamera":{"RequestState":true,"ResetHome":true}}'));
+    channel.send(encode(51, request));
+    channel.send(Uint8Array.of(60, 87, 0));
+    assert.equal(channel.sent, allowed);
+    assert.equal(window.__pixelstreamSmokeStateRequests, 1);
     assert.equal(window.__pixelstreamSmokeAppBuild.sourceCommit, appBuild.sourceCommit);
     assert.equal(window.__pixelstreamSmokeAppBuild.wasmSha256, appBuild.wasmSha256);
-    assert.equal(window.__pixelstreamSmokeBlockedDataMessages, 1);
+    assert.equal(window.__pixelstreamSmokeBlockedDataMessages, 3);
     assert.throws(() => prepare(html), /different smoke observer/);
     assert.throws(() => prepare('<head></head>', 500, appBuild), /no buffer override/);
 });
