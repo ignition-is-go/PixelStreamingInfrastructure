@@ -340,12 +340,20 @@ function isCurrentPeer(peer, upstream = streamer) {
         streamer === upstream && peer.streamerGeneration === upstream.generation;
 }
 
-function closePeer(peer) {
+function closePeer(peer, reason) {
     if (!peer) {
         return;
     }
 
     if (!peer.closed) {
+        console.log('Viewer transport closing %j', {
+            playerId: peer.id,
+            reason,
+            transportId: peer.transport?.id,
+            iceState: peer.transport?.iceState,
+            dtlsState: peer.transport?.dtlsState,
+            sctpState: peer.transport?.sctpState
+        });
         peer.closed = true;
         if (peers.get(peer.id) === peer) {
             peers.delete(peer.id);
@@ -392,7 +400,7 @@ async function onPeerConnected(peerId) {
 
     const existingPeer = peers.get(peerId);
     if (existingPeer) {
-        closePeer(existingPeer);
+        closePeer(existingPeer, 'duplicate-player');
     }
 
     const peer = {
@@ -419,7 +427,7 @@ async function onPeerConnected(peerId) {
             identifier: `Peer ${peer.id}`
         });
         if (opened.kind === 'stale') {
-            closePeer(peer);
+            closePeer(peer, 'stale-router');
             return;
         }
         peer.route = opened.route;
@@ -441,7 +449,7 @@ async function onPeerConnected(peerId) {
             });
             if (!isCurrentPeer(peer, upstream)) {
                 consumer.close();
-                closePeer(peer);
+                closePeer(peer, 'stale-consumer');
                 return;
             }
             consumer.observer.on("layerschange", function() { console.log("layer changed!", consumer.currentLayers); });
@@ -462,10 +470,10 @@ async function onPeerConnected(peerId) {
         };
 
         if (!sendSignalling(offerSignal)) {
-            closePeer(peer);
+            closePeer(peer, 'offer-send-failed');
         }
     } catch (error) {
-        closePeer(peer);
+        closePeer(peer, 'offer-setup-error');
         throw error;
     }
 }
@@ -479,7 +487,7 @@ async function setupPeerDataChannels(peerId) {
 
     const upstream = streamer;
     if (!isCurrentPeer(peer, upstream)) {
-        closePeer(peer);
+        closePeer(peer, 'stale-data-setup');
         return;
     }
     if (peer.dataChannelsStarted) {
@@ -500,7 +508,7 @@ async function setupPeerDataChannels(peerId) {
     // streamer data producer (produces data for the peer)
     peer.streamerDataProducer = await upstream.transport.produceData({ label: 'send-datachannel', sctpStreamParameters: { streamId: nextStreamerSCTPStreamId, ordered: true } });
     if (!isCurrentPeer(peer, upstream)) {
-        closePeer(peer);
+        closePeer(peer, 'stale-ingress-producer');
         return;
     }
 
@@ -509,33 +517,33 @@ async function setupPeerDataChannels(peerId) {
     // peer data producer (produces data for the streamer)
     peer.peerDataProducer = await peer.transport.produceData({ label: 'send-datachannel', sctpStreamParameters: { streamId: nextPeerSCTPStreamId, ordered: true } });
     if (!isCurrentPeer(peer, upstream)) {
-        closePeer(peer);
+        closePeer(peer, 'stale-peer-producer');
         return;
     }
 
     const localForPeer = await peer.route.fromIngress(peer.streamerDataProducer);
     if (localForPeer.kind === 'stale') {
-        closePeer(peer);
+        closePeer(peer, 'stale-peer-route');
         return;
     }
 
     // peer data consumer (consumes streamer data)
     peer.peerDataConsumer = await peer.transport.consumeData({ dataProducerId: localForPeer.producer.id });
     if (!isCurrentPeer(peer, upstream)) {
-        closePeer(peer);
+        closePeer(peer, 'stale-peer-consumer');
         return;
     }
 
     const localForStreamer = await peer.route.toIngress(peer.peerDataProducer);
     if (localForStreamer.kind === 'stale') {
-        closePeer(peer);
+        closePeer(peer, 'stale-ingress-route');
         return;
     }
 
     // streamer data consumer (consumes peer data)
     peer.streamerDataConsumer = await upstream.transport.consumeData({ dataProducerId: localForStreamer.producer.id });
     if (!isCurrentPeer(peer, upstream)) {
-        closePeer(peer);
+        closePeer(peer, 'stale-ingress-consumer');
         return;
     }
 
@@ -548,7 +556,7 @@ async function setupPeerDataChannels(peerId) {
 
     // Send browser a message with a send/recv data channel SCTP stream id
     if (!sendSignalling(peerSignal)) {
-        closePeer(peer);
+        closePeer(peer, 'peer-channels-send-failed');
     }
 
 }
@@ -558,13 +566,13 @@ async function setupMultiplexPeerDataChannels(peer, upstream) {
     const nextPeerSCTPStreamId = peer.transport.getNextSctpStreamId();
     peer.peerDataProducer = await peer.transport.produceData({ label: 'send-datachannel', sctpStreamParameters: { streamId: nextPeerSCTPStreamId, ordered: true } });
     if (!isCurrentPeer(peer, upstream)) {
-        closePeer(peer);
+        closePeer(peer, 'stale-router-producer');
         return;
     }
 
     const localForDataRouter = await peer.route.toIngress(peer.peerDataProducer);
     if (localForDataRouter.kind === 'stale') {
-        closePeer(peer);
+        closePeer(peer, 'stale-router-ingress');
         return;
     }
 
@@ -574,19 +582,19 @@ async function setupMultiplexPeerDataChannels(peer, upstream) {
         upstream.generation
     );
     if (!peer.dataRouterPlayer || !isCurrentPeer(peer, upstream)) {
-        closePeer(peer);
+        closePeer(peer, 'stale-router-player');
         return;
     }
 
     const localForPeer = await peer.route.fromIngress(peer.dataRouterPlayer.producer);
     if (localForPeer.kind === 'stale') {
-        closePeer(peer);
+        closePeer(peer, 'stale-router-egress');
         return;
     }
 
     peer.peerDataConsumer = await peer.transport.consumeData({ dataProducerId: localForPeer.producer.id });
     if (!isCurrentPeer(peer, upstream) || !dataRouter.activatePlayer(peer.dataRouterPlayer)) {
-        closePeer(peer);
+        closePeer(peer, 'router-activation-failed');
         return;
     }
     console.log('peerProducerId %s, peerConsumerId %s', peer.peerDataProducer.id, peer.peerDataConsumer.id);
@@ -598,7 +606,7 @@ async function setupMultiplexPeerDataChannels(peer, upstream) {
         recvStreamId: peer.peerDataConsumer.sctpStreamParameters.streamId
     };
     if (!sendSignalling(peerSignal)) {
-        closePeer(peer);
+        closePeer(peer, 'router-channels-send-failed');
     }
 }
 
@@ -631,7 +639,7 @@ async function setupStreamerDataChannelsForPeer(peerId) {
 
     // send streamer a message with a send/recv data channel SCTP stream id
     if (!isCurrentPeer(peer, upstream) || !sendSignalling(streamerSignal)) {
-        closePeer(peer);
+        closePeer(peer, 'upstream-channels-unavailable');
     }
 }
 
@@ -647,25 +655,25 @@ async function onPeerAnswer(peerId, sdp) {
         try {
             await peer.sdpEndpoint.processAnswer(sdp);
             if (!isCurrentPeer(peer, upstream)) {
-                closePeer(peer);
+                closePeer(peer, 'stale-answer');
                 return;
             }
             for (const consumer of peer.consumers) {
                 await consumer.resume();
                 if (!isCurrentPeer(peer, upstream)) {
-                    closePeer(peer);
+                    closePeer(peer, 'stale-resume');
                     return;
                 }
                 if (consumer.kind === 'video') {
                     await consumer.requestKeyFrame();
                     if (!isCurrentPeer(peer, upstream)) {
-                        closePeer(peer);
+                        closePeer(peer, 'stale-keyframe-request');
                         return;
                     }
                 }
             }
         } catch (error) {
-            closePeer(peer);
+            closePeer(peer, 'answer-processing-error');
             console.error(`Failed to activate media for player ${peerId}: ${error.stack || error.message}`);
         }
     }
@@ -676,14 +684,14 @@ function onPeerDisconnected(peerId) {
     waitingPeers.delete(peerId);
     const peer = peers.get(peerId);
     if (peer) {
-        closePeer(peer);
+        closePeer(peer, 'signalling-peer-disconnected');
     }
 }
 
 function disconnectAllPeers() {
     console.log("Disconnected all players");
     for (const peer of [...peers.values()]) {
-        closePeer(peer);
+        closePeer(peer, 'upstream-disconnected');
     }
 }
 
@@ -745,7 +753,7 @@ async function onSignallingMessage(message) {
         }
     } catch (error) {
         if (msg.playerId) {
-            closePeer(peers.get(msg.playerId));
+            closePeer(peers.get(msg.playerId), 'signalling-handler-error');
         }
         throw error;
     }
