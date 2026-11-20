@@ -107,6 +107,9 @@ async function createRouterFanout({
         transport.on('iceselectedtuplechange', (iceTuple) => {
             logger.log('%s ICE selected tuple %s', identifier, JSON.stringify(iceTuple));
         });
+        transport.on('dtlsstatechange', (dtlsState) => {
+            logger.log('%s DTLS state changed to %s', identifier, dtlsState);
+        });
         transport.on('sctpstatechange', (sctpState) => {
             logger.log('%s SCTP state changed to %s', identifier, sctpState);
             if (onSctpStateChange) {
