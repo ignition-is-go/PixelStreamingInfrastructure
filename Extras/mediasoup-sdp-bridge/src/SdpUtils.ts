@@ -13,6 +13,10 @@ import {
 import { MediaAttributes } from "sdp-transform";
 import _ from "lodash";
 
+function allowsLevelAsymmetry(value: unknown): boolean {
+  return value === 1 || value === "1";
+}
+
 // SDP to RTP Capabilities and Parameters
 // ======================================
 
@@ -83,6 +87,24 @@ export function sdpToProducerRtpParameters(
   MsOrtc.validateRtpCapabilities(_localCaps);
   MsOrtc.validateRtpCapabilities(caps);
 
+  const offeredH264Levels = new Map<number, string>();
+  for (const codec of caps.codecs ?? []) {
+    const parameters = codec.parameters;
+    const levelId = parameters?.["profile-level-id"];
+    if (
+      codec.mimeType.toLowerCase() === "video/h264" &&
+      typeof codec.preferredPayloadType === "number" &&
+      parameters &&
+      (typeof levelId === "string" || typeof levelId === "number")
+    ) {
+      // SDP parsing coerces hex IDs with only decimal digits to numbers.
+      const level = String(levelId);
+      parameters["profile-level-id"] = level;
+      if (allowsLevelAsymmetry(parameters["level-asymmetry-allowed"])) {
+        offeredH264Levels.set(codec.preferredPayloadType, level);
+      }
+    }
+  }
   const extendedCaps = MsOrtc.getExtendedRtpCapabilities(_localCaps, caps);
   const producerParams = MsOrtc.getSendingRtpParameters(kind, extendedCaps);
 
@@ -116,6 +138,14 @@ export function sdpToProducerRtpParameters(
       );
       if (extendedCodec) {
         codec.payloadType = extendedCodec.remotePayloadType;
+        const level = offeredH264Levels.get(codec.payloadType);
+        // The receive-only SFU forwards the matched H.264 stream as offered.
+        if (
+          level !== undefined &&
+          allowsLevelAsymmetry(codec.parameters["level-asymmetry-allowed"])
+        ) {
+          codec.parameters["profile-level-id"] = level;
+        }
       }
     }
   }
